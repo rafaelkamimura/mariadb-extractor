@@ -1,14 +1,16 @@
 # MariaDB Extractor
 
-A CLI tool for extracting database and table information from MariaDB servers. Generates both human-readable markdown files and machine-readable JSON files with comprehensive database schema information.
+A comprehensive CLI tool for extracting database information from MariaDB servers. Provides multiple extraction methods including metadata, DDL statements, and full database dumps for development, documentation, and backup purposes.
 
 ## Features
 
-- Extract database names and metadata from MariaDB servers
-- Retrieve detailed table information including types, engines, and storage metrics
+- **Extract Command**: Extract database names and metadata from MariaDB servers
+- **DDL Command**: Retrieve complete CREATE TABLE statements for all tables
+- **Dump Command**: Create full database dumps using mysqldump for local development
 - Generate formatted markdown reports for documentation
 - Create structured JSON output for automation and integration
 - Support for custom connection parameters via CLI flags or environment variables
+- Flexible output options including compression support
 
 ## Installation
 
@@ -44,10 +46,26 @@ MARIADB_OUTPUT_PREFIX=mariadb-extract
 ./mariadb-extractor extract
 ```
 
-## Usage
+## Commands
 
+The tool provides three main commands:
+
+### Extract Command
+Extract database and table metadata:
 ```bash
 ./mariadb-extractor extract --host localhost --port 3306 --user your_username --password your_password --output my-extraction
+```
+
+### DDL Command
+Extract CREATE TABLE statements for all tables:
+```bash
+./mariadb-extractor ddl --host localhost --port 3306 --user your_username --password your_password --output my-ddl
+```
+
+### Dump Command
+Create full database dumps for local development:
+```bash
+./mariadb-extractor dump --all-databases --host localhost --port 3306 --user your_username --password your_password
 ```
 
 ### Environment Variables
@@ -72,8 +90,9 @@ Environment variables are overridden by command-line flags if both are provided.
 
 ### Examples
 
-#### Using .env File
+#### Extract Command Examples
 
+**Using .env File:**
 ```bash
 # Create your .env file
 cat > .env << EOF
@@ -87,9 +106,7 @@ EOF
 ./mariadb-extractor extract
 ```
 
-#### Using Environment Variables
-
-Set credentials via environment:
+**Using Environment Variables:**
 ```bash
 export MARIADB_HOST=db.example.com
 export MARIADB_PORT=3306
@@ -100,9 +117,7 @@ export MARIADB_OUTPUT_PREFIX=production
 ./mariadb-extractor extract
 ```
 
-#### Mix Environment Variables and CLI Flags
-
-Use environment for credentials, override host via CLI:
+**Mix Environment Variables and CLI Flags:**
 ```bash
 export MARIADB_USER=myuser
 export MARIADB_PASSWORD=mypassword
@@ -110,16 +125,54 @@ export MARIADB_PASSWORD=mypassword
 ./mariadb-extractor extract -H dev-db.example.com -o dev-extraction
 ```
 
-#### Traditional CLI Usage
-
-Extract from local MariaDB with all flags:
+**Traditional CLI Usage:**
 ```bash
 ./mariadb-extractor extract -u root -p mypassword
+./mariadb-extractor extract -H db.example.com -P 3307 -u admin -p secret -o production-db
 ```
 
-Extract from remote server:
+#### DDL Command Examples
+
+**Extract DDL for all databases:**
 ```bash
-./mariadb-extractor extract -H db.example.com -P 3307 -u admin -p secret -o production-db
+./mariadb-extractor ddl --all-databases
+```
+
+**Extract DDL for specific databases:**
+```bash
+./mariadb-extractor ddl --databases mydb,otherdb
+```
+
+**Extract DDL with custom output:**
+```bash
+./mariadb-extractor ddl -H db.example.com -u admin -p secret -o schema-docs
+```
+
+#### Dump Command Examples
+
+**Dump all databases (schema + data):**
+```bash
+./mariadb-extractor dump --all-databases
+```
+
+**Dump specific databases:**
+```bash
+./mariadb-extractor dump --databases mydb,otherdb
+```
+
+**Schema-only dump:**
+```bash
+./mariadb-extractor dump --all-databases --schema-only
+```
+
+**Data-only dump:**
+```bash
+./mariadb-extractor dump --databases mydb --data-only
+```
+
+**Compressed dump:**
+```bash
+./mariadb-extractor dump --all-databases --compress
 ```
 
 #### CI/CD Pipeline Example
@@ -132,22 +185,57 @@ env:
   MARIADB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
 script:
-  - ./mariadb-extractor extract -o nightly-backup
+  # Extract metadata for documentation
+  - ./mariadb-extractor extract -o nightly-docs
+  # Extract DDL for schema documentation
+  - ./mariadb-extractor ddl -o nightly-schema
+  # Create backup dump
+  - ./mariadb-extractor dump --all-databases --compress
 ```
+
+## Command Comparison
+
+Choose the right command for your use case:
+
+| Command | Purpose | Output | Use Case |
+|---------|---------|--------|----------|
+| `extract` | Database metadata | Markdown + JSON | Documentation, inventory, monitoring |
+| `ddl` | Table schemas | Markdown with SQL | Schema documentation, version control |
+| `dump` | Full database | SQL dump | Local development, backup, migration |
 
 ## Output Files
 
-The tool generates two output files:
+The tool generates different output files depending on the command used:
 
-### Markdown Report (.md)
+### Extract Command Output
+
+**Markdown Report (.md):**
 - Human-readable documentation
 - Formatted tables with database and table information
 - Summary statistics and metadata
 
-### JSON Data (.json)
+**JSON Data (.json):**
 - Machine-readable structured data
 - Comprehensive metadata including extraction timestamp
 - Suitable for automation and further processing
+
+### DDL Command Output
+
+**DDL Markdown (.md):**
+- Complete CREATE TABLE statements for all tables
+- Organized by database with syntax-highlighted SQL
+- Perfect for schema documentation and version control
+
+### Dump Command Output
+
+**SQL Dump (.sql):**
+- Complete database dump compatible with mysql client
+- Can be imported locally with: `mysql -u root -p < dump.sql`
+- Supports schema-only, data-only, or full dumps
+
+**Compressed SQL Dump (.sql.gz):**
+- Gzipped version of the SQL dump for smaller file sizes
+- Can be imported with: `gunzip < dump.sql.gz | mysql -u root -p`
 
 ## Output Structure
 
@@ -187,6 +275,30 @@ The tool generates two output files:
 - Go 1.19 or later
 - Access to MariaDB/MySQL server
 - MySQL client libraries (handled by go-sql-driver/mysql)
+
+### Additional Requirements for Dump Command
+
+The `dump` command requires the `mysqldump` utility to be installed on your system:
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install mariadb-client
+```
+
+**CentOS/RHEL:**
+```bash
+sudo yum install mariadb
+```
+
+**macOS:**
+```bash
+brew install mariadb
+```
+
+**Windows:**
+Download and install from: https://mariadb.com/downloads/
+
+**Note:** The `extract` and `ddl` commands only require Go and database access. The `dump` command additionally requires the MariaDB/MySQL client tools.
 
 ## License
 
