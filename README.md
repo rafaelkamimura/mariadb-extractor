@@ -1,688 +1,408 @@
 # MariaDB Extractor
 
-A comprehensive CLI tool for extracting database information from MariaDB servers. Provides multiple extraction methods including metadata, DDL statements, and full database dumps for development, documentation, and backup purposes.
+A comprehensive CLI tool for extracting database schemas and data from MariaDB servers. Designed for efficient database migration, development environment setup, and backup operations with advanced features including foreign key preservation, selective data extraction, and progressive processing.
 
 ## Features
 
-- **Extract Command**: Extract database names and metadata from MariaDB servers
-- **DDL Command**: Retrieve complete CREATE TABLE statements for all tables
-- **Dump Command**: Create full database dumps using mysqldump for local development
-- Generate formatted markdown reports for documentation
-- Create structured JSON output for automation and integration
-- Support for custom connection parameters via CLI flags or environment variables
-- Flexible output options including compression support
+### Core Commands
+
+- **Extract**: Database metadata extraction with detailed table information
+- **DDL**: Complete schema extraction with CREATE TABLE statements
+- **Dump**: Traditional full database backup using mysqldump
+- **Data**: Advanced selective data extraction with foreign key preservation
+
+### Key Capabilities
+
+- Foreign key dependency resolution with topological sorting
+- Configurable data sampling (percentage or fixed row counts)
+- Progressive extraction with resume capability for large datasets
+- Pattern-based table filtering and exclusion
+- Batch processing for optimal performance
+- Docker-based execution with zero local dependencies
 
 ## Installation
 
-### Option 1: Native Installation
+### Docker Installation (Recommended)
 
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd mariadb-extractor
+
+# Build the Docker image
+make build
+```
+
+### Native Installation
+
+```bash
+# Requires Go 1.25 or later
 go build -o mariadb-extractor
 ```
 
-### Option 2: Docker (Recommended)
+## Quick Start
+
+### 1. Configure Database Connection
 
 ```bash
-# Build the Docker image
-make build
-
-# Or build manually
-docker build -t mariadb-extractor .
-```
-
-## Quick Start with Docker
-
-```bash
-# 1. Set up environment
+# Create configuration from template
 make env-example
+
 # Edit .env with your database credentials
-
-# 2. Start development environment
-make setup-dev
-
-# 3. Access your database
-# - Adminer (web UI): http://localhost:8080
-# - MySQL client: make dev-db-connect
-
-# 4. Extract from production
-make extract
-make ddl
-make dump
+vim .env
 ```
 
-## Makefile Commands
-
-The project includes a comprehensive Makefile for common operations:
-
-### Development Environment
-- `make setup-dev` - Set up complete development environment
-- `make up` - Start local MariaDB and Adminer
-- `make down` - Stop all services
-- `make dev-db-connect` - Connect to local database
-
-### Data Extraction
-- `make extract` - Extract metadata from configured server
-- `make ddl` - Extract DDL statements from configured server
-- `make dump` - Create full dump from configured server
-- `make extract-local` - Extract from local development database
-
-### Workflow Commands
-- `make extract-to-dev` - Extract from production and update local dev
-- `make backup-local` - Create backup of local development database
-
-### Utility Commands
-- `make build` - Build Docker image
-- `make clean` - Clean up generated files and containers
-- `make status` - Show status of all services
-- `make help` - Show all available commands
-
-### Option 2: Docker (Recommended)
-
-The easiest way to run MariaDB Extractor is using Docker, which includes all dependencies:
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd mariadb-extractor
-
-# Build and run with Docker
-./docker-run.sh extract --help
-```
-
-Or use Docker Compose for more complex setups:
-
-```bash
-# Start with local MariaDB for testing
-docker-compose --profile local-db up -d
-
-# Run the extractor
-docker-compose run --rm mariadb-extractor extract --all-databases
-```
-
-### Option 2: Docker (Recommended)
-
-The easiest way to use MariaDB Extractor is with Docker, which includes all dependencies:
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd mariadb-extractor
-
-# Make the Docker runner script executable
-chmod +x docker-run.sh
-
-# Build the Docker image
-./docker-run.sh build
-```
-
-**Note:** Docker installation eliminates the need to install MariaDB client tools on your local machine.
-
-## Configuration
-
-The application supports three ways to provide configuration (in order of precedence):
-1. Command-line flags (highest priority)
-2. Environment variables 
-3. `.env` file (lowest priority)
-
-### Using .env File
-
-1. Copy the example configuration:
-```bash
-cp .env.example .env
-```
-
-2. Edit `.env` with your database credentials:
+Example `.env` configuration:
 ```env
-MARIADB_HOST=localhost
+MARIADB_HOST=your-database-host
 MARIADB_PORT=3306
-MARIADB_USER=your_username
-MARIADB_PASSWORD=your_password
-MARIADB_OUTPUT_PREFIX=mariadb-extract
+MARIADB_USER=your-username
+MARIADB_PASSWORD=your-password
+MARIADB_OUTPUT_PREFIX=extraction
 ```
 
-3. Run the extractor:
+### 2. Run Complete Pipeline
+
 ```bash
-./mariadb-extractor extract
+# Recommended: Complete pipeline with sample data (fastest)
+make pipeline
+
+# Alternative: Full data extraction
+make pipeline-full
+
+# Custom: Specific databases and tables
+make pipeline-custom ARGS="--databases db1,db2 --sample-tables users:1000"
 ```
 
-### Docker Configuration
+## Command Reference
 
-When using Docker, you can configure the tool the same way:
+### Data Extraction Pipeline (New)
 
-1. **Using .env file** (recommended):
+The `data` command provides advanced selective extraction with foreign key preservation:
+
 ```bash
-# Your .env file will be automatically loaded
-./docker-run.sh extract
+# Extract with 10% sampling
+./mariadb-extractor data --all-user-databases --sample-percent 10
+
+# Extract specific databases
+./mariadb-extractor data --databases db1,db2 --exclude-tables "*_log,*_audit"
+
+# Custom sampling per table
+./mariadb-extractor data \
+  --databases myapp \
+  --sample-tables "users:1000,orders:5000" \
+  --exclude-tables "*_history"
+
+# Resume interrupted extraction
+./mariadb-extractor data --resume extraction-id
 ```
 
-2. **Using environment variables**:
+#### Data Command Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--all-user-databases` | Extract all non-system databases | - |
+| `--databases` | Comma-separated list of databases | - |
+| `--exclude-tables` | Pattern-based table exclusion | - |
+| `--sample-percent` | Global sampling percentage (0-100) | 0 |
+| `--sample-tables` | Per-table row limits (table:count) | - |
+| `--chunk-size` | Rows per chunk for large tables | 10000 |
+| `--batch-size` | INSERT statement batch size | 100 |
+| `--timeout` | Query timeout in seconds | 300 |
+| `--resume` | Resume from previous extraction | - |
+
+### DDL Extraction
+
+Extract complete database schemas:
+
 ```bash
-export MARIADB_HOST=your-host
-export MARIADB_USER=your-user
-export MARIADB_PASSWORD=your-password
-./docker-run.sh extract
+# Extract all user databases
+./mariadb-extractor ddl --all-user-databases
+
+# Extract specific databases
+./mariadb-extractor ddl --databases db1,db2
 ```
 
-3. **Using command-line flags**:
-```bash
-./docker-run.sh extract -H your-host -u your-user -p your-password
-```
+Output:
+- `output/mariadb-ddl.md` - Formatted documentation
+- `output/init-scripts/01-extracted-schema.sql` - Executable SQL script
 
-## Commands
+### Traditional Dump
 
-The tool provides three main commands:
-
-### Extract Command
-Extract database and table metadata:
-```bash
-./mariadb-extractor extract --host localhost --port 3306 --user your_username --password your_password --output my-extraction
-```
-
-### DDL Command
-Extract CREATE TABLE statements for all tables:
-```bash
-./mariadb-extractor ddl --host localhost --port 3306 --user your_username --password your_password --output my-ddl
-```
-
-### Dump Command
-Create full database dumps for local development:
-```bash
-./mariadb-extractor dump --all-databases --host localhost --port 3306 --user your_username --password your_password
-```
-
-### Docker Usage
-
-Using Docker is the recommended approach as it includes all dependencies:
+Full database backup using mysqldump:
 
 ```bash
-# Extract database metadata
-./docker-run.sh extract --all-databases
+# Dump all user databases
+./mariadb-extractor dump --all-user-databases
 
-# Extract DDL statements
-./docker-run.sh ddl --all-databases
-
-# Create database dump
-./docker-run.sh dump --all-databases --compress
-
-# Get help
-./docker-run.sh help
-
-# Start interactive shell
-./docker-run.sh shell
-```
-
-### Docker Benefits
-
-- **No local dependencies**: MariaDB client tools are included in the container
-- **OS agnostic**: Works on Windows, macOS, and Linux
-- **Isolated environment**: No conflicts with local system tools
-- **Easy distribution**: Share the same environment across your team
-- **Version consistency**: Everyone uses the same tool versions
-
-### Docker Compose (Advanced)
-
-For more complex setups, you can use Docker Compose:
-
-```bash
-# Start with local MariaDB for testing
-docker-compose --profile local-db up -d
-
-# Run extraction against local database
-docker-compose run --rm mariadb-extractor extract
-
-# Stop local database
-docker-compose --profile local-db down
-```
-
-### Environment Variables
-
-The tool supports the following environment variables for configuration:
-
-- `MARIADB_HOST`: MariaDB server host (default: localhost)
-- `MARIADB_PORT`: MariaDB server port (default: 3306)
-- `MARIADB_USER`: MariaDB username
-- `MARIADB_PASSWORD`: MariaDB password
-- `MARIADB_OUTPUT_PREFIX`: Output file prefix (default: mariadb-extract)
-
-Environment variables are overridden by command-line flags if both are provided.
-
-### Command Line Options
-
-- `-H, --host`: MariaDB host (env: MARIADB_HOST, default: localhost)
-- `-P, --port`: MariaDB port (env: MARIADB_PORT, default: 3306)
-- `-u, --user`: MariaDB username (env: MARIADB_USER, required if not in env)
-- `-p, --password`: MariaDB password (env: MARIADB_PASSWORD, required if not in env)
-- `-o, --output`: Output file prefix (env: MARIADB_OUTPUT_PREFIX, default: mariadb-extract)
-
-### Examples
-
-#### Extract Command Examples
-
-**Using .env File:**
-```bash
-# Create your .env file
-cat > .env << EOF
-MARIADB_HOST=db.example.com
-MARIADB_USER=myuser
-MARIADB_PASSWORD=mypassword
-MARIADB_OUTPUT_PREFIX=production
-EOF
-
-# Run the extractor (will automatically load .env)
-./mariadb-extractor extract
-```
-
-**Using Environment Variables:**
-```bash
-export MARIADB_HOST=db.example.com
-export MARIADB_PORT=3306
-export MARIADB_USER=myuser
-export MARIADB_PASSWORD=mypassword
-export MARIADB_OUTPUT_PREFIX=production
-
-./mariadb-extractor extract
-```
-
-**Mix Environment Variables and CLI Flags:**
-```bash
-export MARIADB_USER=myuser
-export MARIADB_PASSWORD=mypassword
-
-./mariadb-extractor extract -H dev-db.example.com -o dev-extraction
-```
-
-**Traditional CLI Usage:**
-```bash
-./mariadb-extractor extract -u root -p mypassword
-./mariadb-extractor extract -H db.example.com -P 3307 -u admin -p secret -o production-db
-```
-
-#### DDL Command Examples
-
-**Extract DDL for all databases:**
-```bash
-./mariadb-extractor ddl --all-databases
-```
-
-**Extract DDL for specific databases:**
-```bash
-./mariadb-extractor ddl --databases mydb,otherdb
-```
-
-**Extract DDL with custom output:**
-```bash
-./mariadb-extractor ddl -H db.example.com -u admin -p secret -o schema-docs
-```
-
-#### Dump Command Examples
-
-**Dump all databases (schema + data):**
-```bash
-./mariadb-extractor dump --all-databases
-```
-
-**Dump specific databases:**
-```bash
-./mariadb-extractor dump --databases mydb,otherdb
-```
-
-**Schema-only dump:**
-```bash
+# Schema only
 ./mariadb-extractor dump --all-databases --schema-only
-```
 
-**Data-only dump:**
-```bash
-./mariadb-extractor dump --databases mydb --data-only
-```
-
-**Compressed dump:**
-```bash
+# Compressed output
 ./mariadb-extractor dump --all-databases --compress
 ```
 
-#### CI/CD Pipeline Example
+### Metadata Extract
 
-```yaml
-# Example GitHub Actions or CI configuration
-env:
-  MARIADB_HOST: ${{ secrets.DB_HOST }}
-  MARIADB_USER: ${{ secrets.DB_USER }}
-  MARIADB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+Extract database and table metadata:
 
-script:
-  # Extract metadata for documentation
-  - ./mariadb-extractor extract -o nightly-docs
-  # Extract DDL for schema documentation
-  - ./mariadb-extractor ddl -o nightly-schema
-  # Create backup dump
-  - ./mariadb-extractor dump --all-databases --compress
-```
-
-## Local Development Setup
-
-The tool includes Docker support for easy local development. Extract schema from your production database and run it locally with a single command.
-
-### Quick Start with Docker
-
-1. **Set up environment variables:**
-```bash
-# Copy and edit the local development config
-cp .env.local.example .env.local
-
-# Edit .env.local with your production database credentials
-# MARIADB_HOST=your-production-db.example.com
-# MARIADB_USER=extraction-user
-# MARIADB_PASSWORD=extraction-password
-```
-
-2. **Extract and setup local database:**
-```bash
-# Load your environment variables
-export $(cat .env.local | xargs)
-
-# Run the setup script (extracts from external DB and starts local container)
-./setup-local-db.sh
-```
-
-3. **Connect to your local database:**
-```bash
-mysql -h localhost -P 3306 -u local-dev-user -plocal-dev-password
-```
-
-### Local Development Workflow
-
-```
-Production DB → Extract DDL → Init Scripts → Local MariaDB Container
-```
-
-**Step 1: Extract from Production**
 ```bash
 # Extract all databases
-./setup-local-db.sh
+./mariadb-extractor extract --all-databases
 
-# Extract specific databases
-./setup-local-db.sh --databases myapp,userdb
-
-# Extract schema only (no sample data)
-./setup-local-db.sh --schema-only
+# Generate JSON output
+./mariadb-extractor extract --output metadata
 ```
 
-**Step 2: Local Development**
+## Makefile Targets
+
+### Pipeline Commands
+
+| Target | Description |
+|--------|-------------|
+| `make pipeline` | Complete pipeline with 10% sample data |
+| `make pipeline-full` | Complete pipeline with full data |
+| `make pipeline-custom` | Pipeline with custom extraction parameters |
+
+### Individual Steps
+
+| Target | Description |
+|--------|-------------|
+| `make ddl` | Extract database schemas |
+| `make setup-from-ddl` | Initialize local database with schema |
+| `make extract-data-sample` | Extract 10% sample data |
+| `make extract-data-full` | Extract complete data |
+| `make seed-dev-data` | Import extracted data to local database |
+
+### Development Environment
+
+| Target | Description |
+|--------|-------------|
+| `make setup-dev` | Start local MariaDB and Adminer |
+| `make dev-db-connect` | Connect to local database via CLI |
+| `make status` | Show service and file status |
+| `make clean` | Clean generated files and containers |
+
+## Workflow Examples
+
+### Development Environment Setup
+
 ```bash
-# Start local database
-docker-compose --profile local-db up -d mariadb
+# 1. Configure connection
+cp .env.example .env
+vim .env
 
-# Connect and develop
-mysql -h localhost -P 3306 -u local-dev-user -plocal-dev-password
+# 2. Run pipeline (DDL -> Setup -> Extract -> Seed)
+make pipeline
 
-# View logs
-docker-compose logs mariadb
-
-# Stop when done
-docker-compose down
+# 3. Access database
+# Web UI: http://localhost:8080
+# CLI: make dev-db-connect
 ```
 
-### Docker Commands
+### Production Mirror
 
-**Using Docker directly:**
 ```bash
-# Build the image
-docker build -t mariadb-extractor .
+# Extract complete production data
+make pipeline-full
 
-# Run extraction
-docker run --rm -it \
+# Or manually with custom settings
+make ddl
+make setup-from-ddl
+make extract-data-custom ARGS="--databases prod_db --max-rows 50000"
+make seed-dev-data
+```
+
+### Selective Data Extraction
+
+```bash
+# Extract specific tables with sampling
+docker run --rm \
   --env-file .env \
   -v $(pwd):/app/output \
-  mariadb-extractor ddl --all-databases
+  mariadb-extractor data \
+    --databases users_db,orders_db \
+    --sample-tables "users:10000,orders:50000,products:all" \
+    --exclude-tables "*_temp,*_backup"
 ```
 
-**Using the helper script:**
-```bash
-# All commands work with Docker
-./docker-run.sh extract --all-databases
-./docker-run.sh ddl --databases mydb
-./docker-run.sh dump --all-databases --compress
+## Architecture
+
+### Project Structure
+
+```
+mariadb-extractor/
+├── cmd/
+│   ├── root.go      # CLI root command
+│   ├── extract.go   # Metadata extraction
+│   ├── ddl.go       # Schema extraction
+│   ├── dump.go      # Full backup
+│   └── data.go      # Selective data extraction
+├── internal/
+│   └── config/
+│       └── env.go   # Environment configuration
+├── output/          # Generated files
+│   └── init-scripts/
+│       └── *.sql    # Database initialization scripts
+└── docker-compose.yml
 ```
 
-## Docker Usage
+### Data Extraction Pipeline
 
-Docker provides the easiest way to run MariaDB Extractor with all dependencies included.
+The `data` command implements a sophisticated extraction pipeline:
 
-### Quick Start with Docker
+1. **Schema Analysis**: Discovers foreign key relationships
+2. **Dependency Resolution**: Topological sort for correct table ordering
+3. **Extraction Planning**: Optimizes based on table sizes and sampling
+4. **Progressive Extraction**: Chunks large tables with progress tracking
+5. **Data Generation**: Creates optimized INSERT statements
 
-```bash
-# Build and run (auto-builds if needed)
-./docker-run.sh extract --all-databases
+### Foreign Key Handling
 
-# Or run specific commands
-./docker-run.sh ddl --databases mydb
-./docker-run.sh dump --all-databases --compress
-```
+- Automatic dependency detection via `information_schema`
+- Topological sorting ensures correct extraction order
+- `SET FOREIGN_KEY_CHECKS=0/1` wrapper for safe imports
+- Preserves referential integrity across sampled data
 
-### Docker Environment Variables
+## Configuration
 
-Set your database credentials:
+### Environment Variables
 
-```bash
-# Using environment variables
-export MARIADB_HOST=localhost
-export MARIADB_PORT=3306
-export MARIADB_USER=myuser
-export MARIADB_PASSWORD=mypass
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MARIADB_HOST` | Database host | localhost |
+| `MARIADB_PORT` | Database port | 3306 |
+| `MARIADB_USER` | Database username | - |
+| `MARIADB_PASSWORD` | Database password | - |
+| `MARIADB_OUTPUT_PREFIX` | Output file prefix | mariadb-extract |
+| `MARIADB_TIMEOUT` | Query timeout (seconds) | 300 |
+| `MARIADB_CHUNK_SIZE` | Rows per chunk | 10000 |
+| `MARIADB_BATCH_SIZE` | Batch insert size | 100 |
 
-./docker-run.sh extract
-```
+### Docker Compose Services
 
-Or create a `.env` file:
-```env
-MARIADB_HOST=localhost
-MARIADB_PORT=3306
-MARIADB_USER=myuser
-MARIADB_PASSWORD=mypass
-MARIADB_OUTPUT_PREFIX=my-extraction
-```
+- **MariaDB**: Local database instance (port 3307)
+- **Adminer**: Web-based database management (port 8080)
+- **Extractor**: Main application container
 
-### Local Development with Docker Compose
+## Performance Considerations
 
-For local testing, use the included MariaDB container:
+### Large Database Optimization
 
-```bash
-# Start MariaDB with sample data
-docker-compose --profile local-db up -d
+- **Chunked Processing**: Configurable chunk size for memory efficiency
+- **Batch Inserts**: Reduces I/O with configurable batch sizes
+- **Progress Tracking**: Resume capability for interrupted extractions
+- **Connection Pooling**: Optimized database connections
 
-# Wait for MariaDB to be ready
-sleep 10
+### Sampling Strategies
 
-# Run extractor against local database
-docker-compose run --rm mariadb-extractor extract --all-databases
-
-# Stop the database
-docker-compose --profile local-db down
-```
-
-The local MariaDB includes sample databases:
-- `ecommerce` - E-commerce site with users, products, orders
-- `blog` - Blog system with posts and categories
-- `empty_db` - Empty database for testing
-- `test_system_db` - Additional test database
-
-### Docker Commands
-
-```bash
-# Build the Docker image
-./docker-run.sh build
-
-# Start interactive shell in container
-./docker-run.sh shell
-
-# Get help
-./docker-run.sh help
-```
-
-### Docker Compose Examples
-
-```bash
-# Extract metadata from local database
-docker-compose run --rm mariadb-extractor extract -u testuser -p testpass
-
-# Extract DDL from specific databases
-docker-compose run --rm mariadb-extractor ddl --databases ecommerce,blog
-
-# Create compressed dump
-docker-compose run --rm mariadb-extractor dump --all-databases --compress
-```
-
-## Development Workflow
-
-### 1. Extract from Production
-Use the mariadb-extractor to extract data from your production/external database:
-
-```bash
-# Extract metadata for documentation
-make extract
-
-# Extract DDL for schema management
-make ddl
-
-# Create full backup for local development
-make dump
-```
-
-### 2. Set up Local Development
-The extracted data is automatically used to populate your local MariaDB instance:
-
-```bash
-# Start local development environment
-make setup-dev
-
-# The init-scripts/ directory is mounted as Docker init scripts
-# Your extracted data will be automatically loaded into the local database
-```
-
-### 3. Update Local with Production Data
-When you need to refresh your local development database with fresh production data:
-
-```bash
-# Extract from production and update local dev
-make extract-to-dev
-```
-
-## Command Comparison
-
-Choose the right command for your use case:
-
-| Command | Purpose | Output | Use Case |
-|---------|---------|--------|----------|
-| `extract` | Database metadata | Markdown + JSON | Documentation, inventory, monitoring |
-| `ddl` | Table schemas | Markdown with SQL | Schema documentation, version control |
-| `dump` | Full database | SQL dump | Local development, backup, migration |
+- **Percentage Sampling**: Consistent sampling across all tables
+- **Fixed Row Counts**: Specific limits per table
+- **Pattern Exclusion**: Skip log, audit, and temporary tables
+- **Foreign Key Preservation**: Maintains relationships in sampled data
 
 ## Output Files
 
-The tool generates different output files depending on the command used:
+### DDL Extraction
 
-### Extract Command Output
+- `output/mariadb-ddl.md`: Human-readable schema documentation
+- `output/init-scripts/01-extracted-schema.sql`: Complete DDL statements
 
-**Markdown Report (.md):**
-- Human-readable documentation
-- Formatted tables with database and table information
-- Summary statistics and metadata
+### Data Extraction
 
-**JSON Data (.json):**
-- Machine-readable structured data
-- Comprehensive metadata including extraction timestamp
-- Suitable for automation and further processing
+- `output/data-extract.sql`: INSERT statements with data
+- `data-extract.progress`: Resume tracking file
 
-### DDL Command Output
+### Metadata Extraction
 
-**DDL Markdown (.md):**
-- Complete CREATE TABLE statements for all tables
-- Organized by database with syntax-highlighted SQL
-- Perfect for schema documentation and version control
+- `output/mariadb-extract.md`: Formatted database information
+- `output/mariadb-extract.json`: Structured metadata
 
-### Dump Command Output
+## Troubleshooting
 
-**SQL Dump (.sql):**
-- Complete database dump compatible with mysql client
-- Can be imported locally with: `mysql -u root -p < dump.sql`
-- Supports schema-only, data-only, or full dumps
+### Common Issues
 
-**Compressed SQL Dump (.sql.gz):**
-- Gzipped version of the SQL dump for smaller file sizes
-- Can be imported with: `gunzip < dump.sql.gz | mysql -u root -p`
-
-## Output Structure
-
-### JSON Format
-```json
-{
-  "metadata": {
-    "server": "localhost:3306",
-    "user": "root",
-    "extracted_at": "2025-01-27T10:30:00Z",
-    "total_databases": 5
-  },
-  "databases": [
-    {
-      "name": "mydatabase",
-      "table_count": 12,
-      "tables": [
-        {
-          "name": "users",
-          "type": "BASE TABLE",
-          "engine": "InnoDB",
-          "row_count": 1000,
-          "data_length": 16384,
-          "index_length": 8192,
-          "collation": "utf8mb4_unicode_ci",
-          "comment": "User accounts table"
-        }
-      ],
-      "extracted_at": "2025-01-27T10:30:00Z"
-    }
-  ]
-}
+**Connection Timeout**
+```bash
+# Increase timeout
+export MARIADB_TIMEOUT=600
 ```
+
+**Foreign Key Errors**
+- Handled automatically with `SET FOREIGN_KEY_CHECKS=0`
+- Tables extracted in dependency order
+
+**Large Dataset Memory Issues**
+```bash
+# Reduce chunk size
+export MARIADB_CHUNK_SIZE=5000
+```
+
+**Resume Failed Extraction**
+```bash
+# Check progress file
+ls *.progress
+
+# Resume with ID
+make extract-data-resume
+```
+
+## Development
+
+### Building from Source
+
+```bash
+# Install dependencies
+go mod download
+
+# Build binary
+go build -o mariadb-extractor
+
+# Run tests
+go test ./...
+```
+
+### Docker Development
+
+```bash
+# Build image
+docker build -t mariadb-extractor .
+
+# Run with local code
+docker run --rm -v $(pwd):/app/output mariadb-extractor --help
+```
+
+## Security
+
+- No hardcoded credentials in source code
+- Environment-based configuration
+- Secure password handling via temporary config files
+- Optional table exclusion for sensitive data
+- Pattern-based filtering for PII protection
 
 ## Requirements
 
-### For Docker Installation (Recommended)
-- Docker Engine 20.10 or later
-- Access to MariaDB/MySQL server
-- **No additional dependencies required!**
+### Docker (Recommended)
+- Docker Engine 20.10+
+- Docker Compose 1.29+
 
-All dependencies (Go, MariaDB client tools, mysqldump, etc.) are included in the Docker container.
-
-### For Source Installation
-- Go 1.19 or later
-- Access to MariaDB/MySQL server
-- MySQL client libraries (handled by go-sql-driver/mysql)
-
-#### Additional Requirements for Dump Command (Source Installation Only)
-
-If building from source and using the `dump` command, you'll need the `mysqldump` utility:
-
-**Ubuntu/Debian:**
-```bash
-sudo apt-get install mariadb-client
-```
-
-**CentOS/RHEL:**
-```bash
-sudo yum install mariadb
-```
-
-**macOS:**
-```bash
-brew install mariadb
-```
-
-**Windows:**
-Download and install from: https://mariadb.com/downloads/
-
-**Note:** The `extract` and `ddl` commands only require Go/Docker and database access. The `dump` command requires `mysqldump` when building from source.
+### Native Installation
+- Go 1.25+
+- MariaDB client tools (for dump command)
+- Network access to MariaDB server
 
 ## License
 
-This project is open source and available under the MIT License.
+MIT License - See LICENSE file for details
+
+## Contributing
+
+Contributions are welcome. Please ensure:
+- Code follows Go best practices
+- Tests pass (`go test ./...`)
+- Docker build succeeds
+- Documentation is updated
+
+## Support
+
+For issues, feature requests, or questions, please open an issue on GitHub.

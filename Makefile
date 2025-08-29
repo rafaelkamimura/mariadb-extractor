@@ -131,6 +131,54 @@ dump-local: ## Create dump from local development database
 		-v $(PWD):/app/output \
 		mariadb-extractor dump --all-databases -o local-dump
 
+# Data Extraction Commands (New selective data pipeline)
+extract-data-sample: ## Extract sample data from configured server (10% by default)
+	@echo "Extracting sample data from production database..."
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor data --all-user-databases --sample-percent 10 --exclude-tables "*_log,*_audit,*_history"
+	@echo "Sample data extracted to output/data-extract.sql"
+
+extract-data-full: ## Extract full data preserving referential integrity
+	@echo "Extracting full data from production database..."
+	@echo "WARNING: This may take a long time for large databases!"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor data --all-user-databases --exclude-tables "*_log,*_audit"
+	@echo "Full data extracted to output/data-extract.sql"
+
+extract-data-custom: ## Extract data with custom settings (usage: make extract-data-custom ARGS="--databases db1,db2 --sample-tables users:1000")
+	@echo "Extracting data with custom settings..."
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor data $(ARGS)
+	@echo "Data extracted to output/data-extract.sql"
+
+seed-dev-data: ## Seed development database with extracted data
+	@echo "Seeding development database with extracted data..."
+	@if [ ! -f "output/data-extract.sql" ]; then \
+		echo "Error: No data file found. Run 'make extract-data-sample' first."; \
+		exit 1; \
+	fi
+	@echo "Importing data into local MariaDB..."
+	docker-compose exec -T mariadb mysql -u root -ppassword < output/data-extract.sql
+	@echo "Development database seeded successfully!"
+
+extract-data-resume: ## Resume interrupted data extraction
+	@echo "Resuming data extraction..."
+	@if [ ! -f "data-extract.progress" ]; then \
+		echo "Error: No progress file found. Nothing to resume."; \
+		exit 1; \
+	fi
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor data --all-user-databases --resume data-extract
+	@echo "Data extraction resumed and completed!"
+
 # Development Workflow
 setup-dev: ## Set up complete development environment
 	@echo "Setting up MariaDB Extractor development environment..."
@@ -169,8 +217,9 @@ extract-to-dev: ## Extract DDL from production and set up local dev database (sc
 		echo "   - MySQL: make dev-db-connect"; \
 		echo ""; \
 		echo "💡 Next steps:"; \
-		echo "   - Run 'make migrate-data' to extract and import production data"; \
-		echo "   - Or run 'make extract-data DB=database_name' for specific data"; \
+		echo "   - Run 'make extract-data-sample' to extract sample data (10%)"; \
+		echo "   - Run 'make seed-dev-data' to import the extracted data"; \
+		echo "   - Or run 'make extract-data-custom ARGS=\"--databases db1,db2\"' for specific data"; \
 	else \
 		echo "❌ Operation cancelled."; \
 	fi
@@ -277,8 +326,8 @@ test-ddl-small: ## Test DDL extraction with just first 10 databases (to trigger 
 	@echo "   - Adminer: http://localhost:8080"
 	@echo "   - MySQL: make dev-db-connect"
 
-full-setup: ## Complete setup: extract schema + setup local + populate data
-	@echo "🚀 Starting complete production-to-local setup..."
+full-setup: ## Complete setup: extract schema + setup local + populate data (OLD - uses dump)
+	@echo "🚀 Starting complete production-to-local setup (using dump)..."
 	@echo "This will:"
 	@echo "  1. Extract DDL schema from production"
 	@echo "  2. Set up local database with schema"
@@ -304,6 +353,111 @@ full-setup: ## Complete setup: extract schema + setup local + populate data
 		echo "   - MySQL: make dev-db-connect"; \
 	else \
 		echo "❌ Operation cancelled."; \
+	fi
+
+pipeline: ## Run complete pipeline: DDL → Setup → Extract Data → Seed (NEW optimized workflow)
+	@echo "🚀 Running complete data pipeline..."
+	@echo "This will:"
+	@echo "  1. Extract DDL schema from production (~30s)"
+	@echo "  2. Setup local database with schema"
+	@echo "  3. Extract sample data (10% by default)"
+	@echo "  4. Seed local database with data"
+	@echo ""
+	@read -p "Continue with pipeline execution? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo ""; \
+		echo "📋 Step 1/4: Extracting DDL schema..."; \
+		$(MAKE) ddl; \
+		echo ""; \
+		echo "🏗️  Step 2/4: Setting up local database with schema..."; \
+		$(MAKE) setup-from-ddl; \
+		echo ""; \
+		echo "📊 Step 3/4: Extracting sample data (10%)..."; \
+		$(MAKE) extract-data-sample; \
+		echo ""; \
+		echo "📥 Step 4/4: Seeding local database..."; \
+		$(MAKE) seed-dev-data; \
+		echo ""; \
+		echo "🎉 Pipeline completed successfully!"; \
+		echo ""; \
+		echo "📈 Database ready with:"; \
+		echo "   ✅ Complete schema structure"; \
+		echo "   ✅ Sample data (10% of production)"; \
+		echo "   ✅ Foreign key relationships preserved"; \
+		echo ""; \
+		echo "🌐 Access your database:"; \
+		echo "   - Adminer UI: http://localhost:8080"; \
+		echo "   - MySQL CLI: make dev-db-connect"; \
+		echo "   - Connection: localhost:3307 (root/password)"; \
+		echo ""; \
+		echo "💡 Next steps:"; \
+		echo "   - For more data: make extract-data-full"; \
+		echo "   - For custom extraction: make extract-data-custom ARGS='...'"; \
+	else \
+		echo "❌ Operation cancelled."; \
+	fi
+
+pipeline-full: ## Run complete pipeline with FULL data extraction (slower but complete)
+	@echo "🚀 Running complete data pipeline with FULL data..."
+	@echo "⚠️  WARNING: This will extract ALL data from production!"
+	@echo ""
+	@echo "This will:"
+	@echo "  1. Extract DDL schema from production"
+	@echo "  2. Setup local database with schema"
+	@echo "  3. Extract ALL data (excluding logs/audit tables)"
+	@echo "  4. Seed local database with complete data"
+	@echo ""
+	@read -p "This may take significant time. Continue? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo ""; \
+		echo "📋 Step 1/4: Extracting DDL schema..."; \
+		$(MAKE) ddl; \
+		echo ""; \
+		echo "🏗️  Step 2/4: Setting up local database with schema..."; \
+		$(MAKE) setup-from-ddl; \
+		echo ""; \
+		echo "📊 Step 3/4: Extracting FULL data..."; \
+		$(MAKE) extract-data-full; \
+		echo ""; \
+		echo "📥 Step 4/4: Seeding local database..."; \
+		$(MAKE) seed-dev-data; \
+		echo ""; \
+		echo "🎉 Full pipeline completed!"; \
+		echo ""; \
+		echo "📈 Database ready with:"; \
+		echo "   ✅ Complete schema structure"; \
+		echo "   ✅ Full production data"; \
+		echo "   ✅ All relationships preserved"; \
+		echo ""; \
+		echo "🌐 Access your database:"; \
+		echo "   - Adminer UI: http://localhost:8080"; \
+		echo "   - MySQL CLI: make dev-db-connect"; \
+	else \
+		echo "❌ Operation cancelled."; \
+	fi
+
+pipeline-custom: ## Run pipeline with custom data extraction (usage: make pipeline-custom ARGS="--databases db1,db2")
+	@echo "🚀 Running pipeline with custom data extraction..."
+	@if [ -z "$(ARGS)" ]; then \
+		echo "Error: Please specify ARGS for custom extraction"; \
+		echo "Example: make pipeline-custom ARGS='--databases mydb --sample-tables users:1000'"; \
+		exit 1; \
+	fi
+	@echo "Custom arguments: $(ARGS)"
+	@echo ""
+	@read -p "Continue with custom pipeline? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo "📋 Extracting DDL..."; \
+		$(MAKE) ddl; \
+		echo "🏗️  Setting up database..."; \
+		$(MAKE) setup-from-ddl; \
+		echo "📊 Extracting custom data..."; \
+		$(MAKE) extract-data-custom ARGS="$(ARGS)"; \
+		echo "📥 Seeding database..."; \
+		$(MAKE) seed-dev-data; \
+		echo "🎉 Custom pipeline completed!"; \
+	else \
+		echo "❌ Cancelled."; \
 	fi
 
 extract-to-dev-full: ## Extract from production (including system DBs) and update local dev
@@ -456,20 +610,25 @@ quick-start: ## Quick start for new developers
 	@echo ""
 	@echo "2. Choose your workflow:"
 	@echo ""
-	@echo "   Option A - Schema Only (Fast):"
-	@echo "   make extract-to-dev     # Extract schema + setup local"
+	@echo "   🆕 RECOMMENDED - Complete Pipeline (NEW):"
+	@echo "   make pipeline           # Full pipeline with 10% sample data (fastest)"
+	@echo "   make pipeline-full      # Full pipeline with complete data (slower)"
+	@echo "   make pipeline-custom ARGS='--databases db1,db2'  # Custom extraction"
 	@echo ""
-	@echo "   Option B - Full Setup (Complete):"
-	@echo "   make full-setup         # Extract schema + data + setup"
+	@echo "   Alternative workflows:"
+	@echo "   make extract-to-dev     # Schema only (no data)"
+	@echo "   make full-setup         # Old workflow using dump command"
 	@echo ""
-	@echo "   Option C - Custom:"
-	@echo "   make ddl                # Extract schema only"
-	@echo "   make setup-from-ddl     # Setup local with schema"
-	@echo "   make populate-data      # Add production data later"
+	@echo "   Manual steps:"
+	@echo "   make ddl                # Extract schema"
+	@echo "   make setup-from-ddl     # Setup database"
+	@echo "   make extract-data-sample # Extract sample data"
+	@echo "   make seed-dev-data      # Import data"
 	@echo ""
 	@echo "3. Access your database:"
 	@echo "   - Adminer (web UI): http://localhost:8080"
 	@echo "   - MySQL client: make dev-db-connect"
+	@echo "   - Connection: localhost:3307 (root/password)"
 	@echo ""
 	@echo "4. Check status:"
 	@echo "   make status             # See current setup"
