@@ -35,11 +35,8 @@ dev-db-connect: ## Connect to the development database via mysql client
 
 # Extraction Commands
 extract: ## Extract database metadata from configured server
-	docker run --rm --network mariadb-extractor_mariadb-network \
-		-e MARIADB_HOST=${MARIADB_HOST} \
-		-e MARIADB_PORT=${MARIADB_PORT} \
-		-e MARIADB_USER=${MARIADB_USER} \
-		-e MARIADB_PASSWORD=${MARIADB_PASSWORD} \
+	docker run --rm \
+		--env-file .env \
 		-v $(PWD):/app/output \
 		mariadb-extractor extract
 
@@ -53,11 +50,8 @@ extract-local: ## Extract from local development database
 		mariadb-extractor extract -o local-dev
 
 ddl: ## Extract DDL statements from configured server
-	docker run --rm --network mariadb-extractor_mariadb-network \
-		-e MARIADB_HOST=${MARIADB_HOST} \
-		-e MARIADB_PORT=${MARIADB_PORT} \
-		-e MARIADB_USER=${MARIADB_USER} \
-		-e MARIADB_PASSWORD=${MARIADB_PASSWORD} \
+	docker run --rm \
+		--env-file .env \
 		-v $(PWD):/app/output \
 		mariadb-extractor ddl
 
@@ -71,11 +65,8 @@ ddl-local: ## Extract DDL from local development database
 		mariadb-extractor ddl -o local-ddl
 
 dump: ## Create full database dump from configured server
-	docker run --rm --network mariadb-extractor_mariadb-network \
-		-e MARIADB_HOST=${MARIADB_HOST} \
-		-e MARIADB_PORT=${MARIADB_PORT} \
-		-e MARIADB_USER=${MARIADB_USER} \
-		-e MARIADB_PASSWORD=${MARIADB_PASSWORD} \
+	docker run --rm \
+		--env-file .env \
 		-v $(PWD):/app/output \
 		mariadb-extractor dump --all-databases
 

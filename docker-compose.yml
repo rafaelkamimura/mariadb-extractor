@@ -5,11 +5,9 @@ services:
   mariadb-extractor:
     build: .
     container_name: mariadb-extractor
+    env_file:
+      - .env
     environment:
-      - MARIADB_HOST=${MARIADB_HOST:-localhost}
-      - MARIADB_PORT=${MARIADB_PORT:-3306}
-      - MARIADB_USER=${MARIADB_USER:-root}
-      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-password}
       - MARIADB_OUTPUT_PREFIX=${MARIADB_OUTPUT_PREFIX:-mariadb-extract}
     volumes:
       - ./init-scripts:/app/init-scripts
