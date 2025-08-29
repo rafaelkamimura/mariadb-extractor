@@ -92,20 +92,74 @@ dump-local: ## Create dump from local development database
 setup-dev: ## Set up complete development environment
 	@echo "Setting up MariaDB Extractor development environment..."
 	$(MAKE) build
+	@if [ -f "init-scripts/01-production-data.sql" ]; then \
+		echo "Found production data - using extracted database schema"; \
+	else \
+		echo "No production data found - using sample data for testing"; \
+	fi
 	$(MAKE) up
 	@echo "Waiting for database to be ready..."
 	@sleep 30
 	@echo "Development environment is ready!"
 	@echo "Adminer available at: http://localhost:8080"
 	@echo "MariaDB available at: localhost:3307"
+	@if [ -f "init-scripts/01-production-data.sql" ]; then \
+		echo "Database loaded with: Production data"; \
+	else \
+		echo "Database loaded with: Sample data"; \
+	fi
 
 extract-to-dev: ## Extract from production and update local dev database
 	@echo "Extracting from production database..."
 	$(MAKE) dump
 	@echo "Updating local development database..."
+	@echo "Note: This will replace the current local database with production data"
+	@read -p "Continue? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		$(MAKE) import-production-data; \
+		echo "Local development database updated with production data!"; \
+	else \
+		echo "Operation cancelled."; \
+	fi
+
+import-production-data: ## Import production data into local development database
+	@echo "Stopping current database..."
+	$(MAKE) down
+	@echo "Removing old database volume..."
+	docker volume rm mariadb-extractor_mariadb_data 2>/dev/null || true
+	@echo "Copying production data to init scripts..."
 	cp mariadb-dump.sql init-scripts/01-production-data.sql
-	$(MAKE) restart
-	@echo "Local development database updated with production data!"
+	@echo "Starting fresh database with production data..."
+	$(MAKE) up
+	@echo "Waiting for database to initialize with new data..."
+	@sleep 30
+	@echo "Production data imported successfully!"
+
+use-sample-data: ## Switch to sample data for local development
+	@echo "Switching to sample data..."
+	$(MAKE) down
+	docker volume rm mariadb-extractor_mariadb_data 2>/dev/null || true
+	@if [ -f "init-scripts/01-production-data.sql" ]; then \
+		mv init-scripts/01-production-data.sql init-scripts/01-production-data.sql.backup; \
+	fi
+	$(MAKE) up
+	@echo "Waiting for database to initialize..."
+	@sleep 30
+	@echo "Database loaded with sample data!"
+
+use-production-data: ## Switch back to production data
+	@echo "Switching to production data..."
+	@if [ ! -f "init-scripts/01-production-data.sql" ] && [ -f "init-scripts/01-production-data.sql.backup" ]; then \
+		mv init-scripts/01-production-data.sql.backup init-scripts/01-production-data.sql; \
+		$(MAKE) down; \
+		docker volume rm mariadb-extractor_mariadb_data 2>/dev/null || true; \
+		$(MAKE) up; \
+		echo "Waiting for database to initialize..."; \
+		sleep 30; \
+		echo "Database loaded with production data!"; \
+	else \
+		echo "No production data backup found. Run 'make extract-to-dev' first."; \
+	fi
 
 backup-local: ## Create backup of local development database
 	@echo "Creating backup of local development database..."
@@ -162,6 +216,17 @@ status: ## Show status of all services
 	@echo ""
 	@echo "=== Docker Volumes ==="
 	@docker volume ls | grep mariadb-extractor || echo "No mariadb-extractor volumes found"
+	@echo ""
+	@echo "=== Database Data Source ==="
+	@if [ -f "init-scripts/01-production-data.sql" ]; then \
+		echo "Current: Production data"; \
+		ls -la init-scripts/01-production-data.sql; \
+	elif [ -f "init-scripts/01-sample-data.sql" ]; then \
+		echo "Current: Sample data"; \
+		ls -la init-scripts/01-sample-data.sql; \
+	else \
+		echo "Current: No data source found"; \
+	fi
 	@echo ""
 	@echo "=== Generated Files ==="
 	@ls -la mariadb-* *-dump* *-ddl* *-extract* 2>/dev/null || echo "No generated files found"
