@@ -152,19 +152,138 @@ setup-dev: ## Set up complete development environment
 		echo "Database loaded with: Sample data"; \
 	fi
 
-extract-to-dev: ## Extract from production and update local dev database
-	@echo "🚀 Extracting from production database..."
-	@echo "This will dump all user databases (excluding system databases)"
-	@echo "Progress will be shown for each database..."
-	$(MAKE) dump
+extract-to-dev: ## Extract DDL from production and set up local dev database (schema only)
+	@echo "🚀 Extracting DDL from production database..."
+	@echo "This will extract database schemas (fast and reliable)"
+	$(MAKE) ddl
 	@echo ""
-	@echo "📦 Updating local development database..."
-	@echo "Note: This will replace the current local database with production data"
-	@read -p "Continue with database replacement? (y/N) " confirm; \
+	@echo "📦 Setting up local development database with schema..."
+	@echo "Note: This will create the database structure without data"
+	@read -p "Continue with schema setup? (y/N) " confirm; \
 	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
-		$(MAKE) import-production-data; \
+		$(MAKE) setup-from-ddl; \
 		echo ""; \
-		echo "✅ Local development database updated with production data!"; \
+		echo "✅ Local development database schema created!"; \
+		echo "🌐 Access your database:"; \
+		echo "   - Adminer: http://localhost:8080"; \
+		echo "   - MySQL: make dev-db-connect"; \
+		echo ""; \
+		echo "💡 Next steps:"; \
+		echo "   - Run 'make migrate-data' to extract and import production data"; \
+		echo "   - Or run 'make extract-data DB=database_name' for specific data"; \
+	else \
+		echo "❌ Operation cancelled."; \
+	fi
+
+setup-from-ddl: ## Set up local database from extracted DDL
+	@echo "🔧 Setting up local database from DDL..."
+	@if [ ! -f "mariadb-ddl.md" ]; then \
+		echo "❌ Error: DDL file not found. Run 'make ddl' first."; \
+		exit 1; \
+	fi
+	@echo "Converting DDL markdown to SQL..."
+	# Extract SQL from markdown and create init script
+	awk 'BEGIN { in_sql = 0 } \
+		/^```sql$$/ { in_sql = 1; next } \
+		/^```$$/ { in_sql = 0; next } \
+		in_sql { print }' mariadb-ddl.md > init-scripts/01-extracted-schema.sql
+	@echo "Restarting database with new schema..."
+	$(MAKE) down
+	docker volume rm mariadb-extractor_mariadb_data 2>/dev/null || true
+	$(MAKE) up
+	@echo "Waiting for database to initialize with schema..."
+	@sleep 30
+	@echo "✅ Database schema setup complete!"
+
+migrate-data: ## Complete data migration workflow
+	@echo "🚀 Starting complete data migration..."
+	@echo "This will extract data from production and import into local database"
+	@read -p "Continue with full data migration? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		$(MAKE) dump-data-only; \
+		$(MAKE) import-data; \
+		echo ""; \
+		echo "✅ Data migration complete!"; \
+		echo "🌐 Your local database now has production data."; \
+	else \
+		echo "❌ Operation cancelled."; \
+	fi
+
+populate-data: ## Extract and populate data for existing schema
+	@echo "📊 Extracting data from production database..."
+	@echo "This will populate your existing schema with production data"
+	@read -p "Continue with data population? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		$(MAKE) dump-data-only; \
+		echo ""; \
+		echo "✅ Data extraction complete!"; \
+		echo "💡 Next: Run 'make import-data' to load into local database"; \
+	else \
+		echo "❌ Operation cancelled."; \
+	fi
+
+dump-data-only: ## Extract data only (no schema) from all databases
+	@echo "📊 Extracting data only from all user databases..."
+	@echo "This excludes schema/structure, only extracts data"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --all-user-databases --data-only 2>&1 | tee data-dump.log
+	@echo "✅ Data extraction complete. Check mariadb-dump.sql"
+
+import-data: ## Import extracted data into local database
+	@echo "📥 Importing data into local database..."
+	@if [ ! -f "mariadb-dump.sql" ]; then \
+		echo "❌ Error: Data dump file not found. Run 'make dump-data-only' first."; \
+		exit 1; \
+	fi
+	@echo "Importing data dump into local MariaDB..."
+	docker-compose exec -T mariadb mysql -u root -p${MYSQL_ROOT_PASSWORD:-password} < mariadb-dump.sql
+	@echo "✅ Data import complete!"
+
+extract-data: ## Extract data from specific database
+	@if [ -z "$(DB)" ]; then \
+		echo "Error: Please specify database name with DB= parameter"; \
+		echo "Example: make extract-data DB=myapp"; \
+		exit 1; \
+	fi
+	@echo "📊 Extracting data from database: $(DB)"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --databases $(DB) --data-only 2>&1 | tee dump-data-$(DB).log
+	@echo "✅ Data extraction complete for $(DB)!"
+	@echo "💡 Next: Run 'make import-data FILE=dump-data-$(DB).sql' to load locally"
+
+
+
+
+	@echo "🌐 Your local database now has both schema and data!"
+	@echo "   - Adminer: http://localhost:8080"
+	@echo "   - MySQL: make dev-db-connect"
+
+full-setup: ## Complete setup: extract schema + setup local + populate data
+	@echo "🚀 Starting complete production-to-local setup..."
+	@echo "This will:"
+	@echo "  1. Extract DDL schema from production"
+	@echo "  2. Set up local database with schema"
+	@echo "  3. Extract and import production data"
+	@echo ""
+	@read -p "This is a comprehensive process. Continue? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo "📋 Step 1: Extracting schema..."; \
+		$(MAKE) ddl; \
+		echo ""; \
+		echo "🏗️  Step 2: Setting up local database..."; \
+		$(MAKE) setup-from-ddl; \
+		echo ""; \
+		echo "📊 Step 3: Extracting data..."; \
+		$(MAKE) dump-data-only; \
+		echo ""; \
+		echo "📥 Step 4: Importing data..."; \
+		$(MAKE) import-data; \
+		echo ""; \
+		echo "🎉 Complete setup finished!"; \
 		echo "🌐 Access your database:"; \
 		echo "   - Adminer: http://localhost:8080"; \
 		echo "   - MySQL: make dev-db-connect"; \
@@ -292,6 +411,23 @@ status: ## Show status of all services
 		echo "Current: No data source found"; \
 	fi
 	@echo ""
+	@echo "=== Schema Files ==="
+	@if [ -f "mariadb-ddl.md" ]; then \
+		echo "✅ DDL Schema: mariadb-ddl.md"; \
+		ls -lh mariadb-ddl.md; \
+	else \
+		echo "❌ No DDL schema file found"; \
+	fi
+	@echo ""
+	@echo "=== Data Files ==="
+	@if [ -f "mariadb-dump.sql" ]; then \
+		echo "✅ Full Dump: mariadb-dump.sql"; \
+		ls -lh mariadb-dump.sql; \
+	else \
+		echo "❌ No dump file found"; \
+	fi
+	@ls -la *-data*.sql 2>/dev/null || true
+	@echo ""
 	@echo "=== Generated Files ==="
 	@ls -la mariadb-* *-dump* *-ddl* *-extract* 2>/dev/null || echo "No generated files found"
 
@@ -303,19 +439,25 @@ quick-start: ## Quick start for new developers
 	@echo "   make env-example"
 	@echo "   # Edit .env with your database credentials"
 	@echo ""
-	@echo "2. Start development environment:"
-	@echo "   make setup-dev"
+	@echo "2. Choose your workflow:"
+	@echo ""
+	@echo "   Option A - Schema Only (Fast):"
+	@echo "   make extract-to-dev     # Extract schema + setup local"
+	@echo ""
+	@echo "   Option B - Full Setup (Complete):"
+	@echo "   make full-setup         # Extract schema + data + setup"
+	@echo ""
+	@echo "   Option C - Custom:"
+	@echo "   make ddl                # Extract schema only"
+	@echo "   make setup-from-ddl     # Setup local with schema"
+	@echo "   make populate-data      # Add production data later"
 	@echo ""
 	@echo "3. Access your database:"
 	@echo "   - Adminer (web UI): http://localhost:8080"
 	@echo "   - MySQL client: make dev-db-connect"
 	@echo ""
-	@echo "4. Extract data from production:"
-	@echo "   make extract"
-	@echo "   make ddl"
-	@echo "   make dump"
-	@echo ""
-	@echo "5. Update local dev with production data:"
-	@echo "   make extract-to-dev"
+	@echo "4. Check status:"
+	@echo "   make status             # See current setup"
+	@echo "   make dev-db-logs        # View database logs"
 	@echo ""
 	@echo "Happy coding! 🎉"
