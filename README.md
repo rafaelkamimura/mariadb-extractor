@@ -26,7 +26,7 @@ A comprehensive CLI tool for extracting database schemas and data from MariaDB s
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/rafaelkamimura/mariadb-extractor.git
 cd mariadb-extractor
 
 # Build the Docker image
