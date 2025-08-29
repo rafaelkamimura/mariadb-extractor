@@ -53,6 +53,11 @@ mariadb-extract*.json
 *-extract*.md
 *-extract*.json
 
+# Local development files
+.env.local
+init-scripts/01-extracted-schema.md
+init-scripts/01-extracted-schema.sql
+
 # IDE files
 .idea/
 .vscode/

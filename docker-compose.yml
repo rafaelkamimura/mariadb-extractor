@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  mariadb-extractor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mariadb-extractor
+    environment:
+      # Database connection settings
+      - MARIADB_HOST=${MARIADB_HOST:-localhost}
+      - MARIADB_PORT=${MARIADB_PORT:-3306}
+      - MARIADB_USER=${MARIADB_USER}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD}
+      - MARIADB_OUTPUT_PREFIX=${MARIADB_OUTPUT_PREFIX:-mariadb-extract}
+    volumes:
+      # Mount current directory to access output files
+      - ./:/app/output
+      # Optional: Mount .env file if it exists
+      - ./.env:/app/.env:ro
+    networks:
+      - mariadb-network
+    # Override entrypoint to use bash for flexibility
+    entrypoint: ["/bin/sh", "-c"]
+    # Default command shows help
+    command: ["./mariadb-extractor --help"]
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+
+  # Optional: MariaDB service for local development/testing
+  mariadb:
+    image: mariadb:10.11
+    container_name: mariadb-local
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-testdb}
+      MYSQL_USER: ${MYSQL_USER:-testuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-testpass}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - mariadb-network
+    # Only start if explicitly requested
+    profiles:
+      - local-db
+
+networks:
+  mariadb-network:
+    driver: bridge
+
+volumes:
+  mariadb_data:

@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Generated files
+mariadb-*.md
+mariadb-*.json
+mariadb-*.sql
+mariadb-*.sql.gz
+*-extract.md
+*-extract.json
+*-ddl.md
+*-dump.sql
+*-dump.sql.gz
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Documentation
+README.md
+AGENTS.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
