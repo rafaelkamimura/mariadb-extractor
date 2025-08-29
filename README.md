@@ -10,6 +10,8 @@ A comprehensive CLI tool for extracting database schemas and data from MariaDB s
 - **DDL**: Complete schema extraction with CREATE TABLE statements
 - **Dump**: Traditional full database backup using mysqldump
 - **Data**: Advanced selective data extraction with foreign key preservation
+- **Query**: Safe read-only query execution with MCP-compatible output
+- **MCP**: Model Context Protocol server for Claude Desktop and Claude Code integration
 
 ### Key Capabilities
 
@@ -74,9 +76,112 @@ make pipeline-full
 make pipeline-custom ARGS="--databases db1,db2 --sample-tables users:1000"
 ```
 
+## MCP Server Integration (New)
+
+The MariaDB Extractor can run as an MCP (Model Context Protocol) server, enabling direct integration with Claude Desktop and Claude Code for AI-assisted database operations.
+
+### Quick Setup for Claude
+
+```bash
+# 1. Build the tool
+go build -o mariadb-extractor
+
+# 2. Add to Claude Desktop config (~/Library/Application Support/Claude/claude_desktop_config.json)
+{
+  "mcpServers": {
+    "mariadb": {
+      "command": "/path/to/mariadb-extractor/mcp-start.sh",
+      "args": [],
+      "env": {
+        "MARIADB_HOST": "localhost",
+        "MARIADB_PORT": "3306",
+        "MARIADB_USER": "username",
+        "MARIADB_PASSWORD": "password"
+      }
+    }
+  }
+}
+
+# 3. Restart Claude Desktop
+```
+
+### Available MCP Tools
+
+- **query_database**: Execute safe SQL queries
+- **get_table_schema**: Get table structure information
+- **get_foreign_keys**: Discover foreign key relationships
+- **list_databases**: List all available databases
+- **list_tables**: List tables with statistics
+
+See [MCP_SETUP.md](MCP_SETUP.md) for detailed configuration instructions.
+
 ## Command Reference
 
-### Data Extraction Pipeline (New)
+### Query Command
+
+The `query` command provides safe, read-only query execution with comprehensive security features:
+
+```bash
+# Execute a simple query
+./mariadb-extractor query -q "SELECT * FROM users LIMIT 10" -d mydb
+
+# Query with JSON output for MCP compatibility
+./mariadb-extractor query -q "SHOW TABLES" -d mydb -f json
+
+# Query from file
+./mariadb-extractor query -F queries.sql -d mydb
+
+# Query foreign key relationships
+./mariadb-extractor query -q "SELECT * FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL" -d mydb
+```
+
+#### Query Command Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-q, --query` | SQL query to execute | - |
+| `-F, --file` | File containing SQL query | - |
+| `-d, --database` | Database to use | - |
+| `-f, --format` | Output format (json, markdown, csv) | markdown |
+| `-l, --limit` | Maximum rows to return | 1000 |
+| `-t, --timeout` | Query timeout in seconds | 30 |
+| `--no-redact` | Disable automatic PII redaction | false |
+| `--audit-log` | Path to audit log file | - |
+| `--rate-limit` | Max queries per second | 5 |
+| `--max-concurrent` | Max concurrent queries | 2 |
+
+#### Security Features
+
+- **Query Validation**: Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries allowed
+- **SQL Injection Prevention**: Comprehensive pattern blocking and validation
+- **Rate Limiting**: Configurable per-second and concurrent query limits
+- **Audit Logging**: Optional JSON-formatted audit trail
+- **PII Redaction**: Automatic redaction of emails, phone numbers, SSNs
+- **Timeout Protection**: Configurable query execution timeout
+
+#### Makefile Query Targets
+
+```bash
+# Basic query execution
+make query Q="SELECT * FROM users" DB=mydb
+
+# JSON output for MCP integration
+make query-json Q="SHOW TABLES" DB=mydb
+
+# CSV output for data export
+make query-csv Q="SELECT id, name FROM users" DB=mydb
+
+# Query foreign key relationships
+make query-relationships DB=mydb
+
+# Query table information
+make query-table-info DB=mydb
+
+# Query with audit logging
+make query-audit Q="SELECT * FROM sensitive_table" DB=mydb
+```
+
+### Data Extraction Pipeline
 
 The `data` command provides advanced selective extraction with foreign key preservation:
 
@@ -237,7 +342,8 @@ mariadb-extractor/
 │   ├── extract.go   # Metadata extraction
 │   ├── ddl.go       # Schema extraction
 │   ├── dump.go      # Full backup
-│   └── data.go      # Selective data extraction
+│   ├── data.go      # Selective data extraction
+│   └── query.go     # Safe query execution
 ├── internal/
 │   └── config/
 │       └── env.go   # Environment configuration

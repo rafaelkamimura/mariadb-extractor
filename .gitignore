@@ -27,6 +27,10 @@ go.work.sum
 *.md
 *.json
 !README.md
+!MCP_SETUP.md
+!CLAUDE.md
+!mcp.json
+!claude_desktop_config.json
 !.env.example
 
 # Generated dump files

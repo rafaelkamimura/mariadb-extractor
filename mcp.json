@@ -1,0 +1,107 @@
+{
+  "name": "mariadb-query",
+  "version": "1.0.0",
+  "description": "Safe MariaDB query execution with read-only access",
+  "author": "MariaDB Extractor",
+  "tools": [
+    {
+      "name": "query_database",
+      "description": "Execute a safe read-only SQL query against MariaDB database. Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The SQL query to execute (SELECT, SHOW, DESCRIBE, or EXPLAIN only)"
+          },
+          "database": {
+            "type": "string",
+            "description": "The database to query against"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["json", "markdown", "csv"],
+            "description": "Output format for the results",
+            "default": "json"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of rows to return",
+            "default": 1000
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_table_schema",
+      "description": "Get the schema information for a specific table including columns, types, and constraints",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "The database name"
+          },
+          "table": {
+            "type": "string",
+            "description": "The table name"
+          }
+        },
+        "required": ["database", "table"]
+      }
+    },
+    {
+      "name": "get_foreign_keys",
+      "description": "Get foreign key relationships for a database or specific table",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "The database name"
+          },
+          "table": {
+            "type": "string",
+            "description": "Optional: specific table to get foreign keys for"
+          }
+        },
+        "required": ["database"]
+      }
+    },
+    {
+      "name": "list_databases",
+      "description": "List all available databases",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_tables",
+      "description": "List all tables in a database with row counts and sizes",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "The database name"
+          }
+        },
+        "required": ["database"]
+      }
+    }
+  ],
+  "config": {
+    "host": "${MARIADB_HOST:-localhost}",
+    "port": "${MARIADB_PORT:-3306}",
+    "user": "${MARIADB_USER}",
+    "password": "${MARIADB_PASSWORD}",
+    "timeout": 30,
+    "rate_limit": 10,
+    "max_concurrent": 3,
+    "enable_audit": true,
+    "audit_log": "${HOME}/.mariadb-mcp/audit.log",
+    "enable_redaction": true
+  }
+}
