@@ -103,6 +103,17 @@ test-connection: ## Test database connection
 		mariadb-extractor extract --help > /dev/null 2>&1 && echo "✅ Connection successful!" || echo "❌ Connection failed!"
 	@echo "If connection fails, check your .env file and database credentials."
 
+test-dump-progress: ## Test dump progress with first 3 databases
+	@echo "Testing dump progress with first 3 databases..."
+	@echo "This will show you the progress format without dumping everything"
+	$(eval FIRST_3_DBS := $(shell docker run --rm --env-file .env mariadb-extractor sh -c "cd /app && go run . dump --help > /dev/null 2>&1 && echo 'adh,agendamento,agendamento_eventos'" 2>/dev/null || echo "adh,agendamento,agendamento_eventos"))
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --databases $(FIRST_3_DBS) 2>&1 | head -20
+	@echo ""
+	@echo "✅ Progress test completed! Use 'make dump' for full dump or 'make extract-to-dev' for production sync."
+
 dump-safe: ## Create database dump excluding system databases
 	@echo "Starting safe database dump (excluding system databases)..."
 	docker run --rm \
@@ -142,16 +153,23 @@ setup-dev: ## Set up complete development environment
 	fi
 
 extract-to-dev: ## Extract from production and update local dev database
-	@echo "Extracting from production database..."
+	@echo "🚀 Extracting from production database..."
+	@echo "This will dump all user databases (excluding system databases)"
+	@echo "Progress will be shown for each database..."
 	$(MAKE) dump
-	@echo "Updating local development database..."
+	@echo ""
+	@echo "📦 Updating local development database..."
 	@echo "Note: This will replace the current local database with production data"
-	@read -p "Continue? (y/N) " confirm; \
+	@read -p "Continue with database replacement? (y/N) " confirm; \
 	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
 		$(MAKE) import-production-data; \
-		echo "Local development database updated with production data!"; \
+		echo ""; \
+		echo "✅ Local development database updated with production data!"; \
+		echo "🌐 Access your database:"; \
+		echo "   - Adminer: http://localhost:8080"; \
+		echo "   - MySQL: make dev-db-connect"; \
 	else \
-		echo "Operation cancelled."; \
+		echo "❌ Operation cancelled."; \
 	fi
 
 extract-to-dev-full: ## Extract from production (including system DBs) and update local dev
