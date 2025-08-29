@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -217,11 +218,38 @@ func dumpDatabasesWithProgress(databases []string) error {
 	fmt.Printf("Starting dump of %d databases...\n\n", totalDBs)
 
 	startTime := time.Now()
-	var successfulDumps, failedDumps int
+	var successfulDumps, failedDumps, skippedDumps int
 
-	for i, dbName := range databases {
+	// Load progress from previous run if exists
+	completedDBs := loadProgress()
+	fmt.Printf("Found %d previously completed databases\n", len(completedDBs))
+
+	// Filter out already completed databases
+	var remainingDBs []string
+	for _, dbName := range databases {
+		if !isDatabaseCompleted(completedDBs, dbName) {
+			remainingDBs = append(remainingDBs, dbName)
+		}
+	}
+
+	if len(remainingDBs) == 0 {
+		fmt.Printf("✅ All databases already completed!\n")
+		return nil
+	}
+
+	fmt.Printf("Remaining databases to dump: %d\n\n", len(remainingDBs))
+
+	for i, dbName := range remainingDBs {
+		// Check if this is a "trash" database to skip
+		if isTrashDatabase(dbName) {
+			fmt.Printf("[%d/%d] ⏭️  Skipping trash database: %s\n", i+1, len(remainingDBs), dbName)
+			skippedDumps++
+			markDatabaseCompleted(dbName)
+			continue
+		}
+
 		dbStartTime := time.Now()
-		fmt.Printf("[%d/%d] Dumping database: %s\n", i+1, totalDBs, dbName)
+		fmt.Printf("[%d/%d] 📦 Dumping database: %s\n", i+1, len(remainingDBs), dbName)
 
 		// Build mysqldump args for this specific database
 		args := []string{
@@ -246,7 +274,7 @@ func dumpDatabasesWithProgress(databases []string) error {
 		args = append(args, dbName)
 
 		// Execute mysqldump for this database
-		if err := executeMysqldumpForDB(args, dbName, dumpPassword, i+1, totalDBs); err != nil {
+		if err := executeMysqldumpForDB(args, dbName, dumpPassword, i+1, len(remainingDBs)); err != nil {
 			fmt.Printf("❌ Failed to dump %s: %v\n", dbName, err)
 			failedDumps++
 			// Continue with next database even if this one fails
@@ -254,14 +282,18 @@ func dumpDatabasesWithProgress(databases []string) error {
 			dbDuration := time.Since(dbStartTime)
 			fmt.Printf("✅ Completed %s in %v\n", dbName, dbDuration.Round(time.Second))
 			successfulDumps++
+			markDatabaseCompleted(dbName)
 		}
 
 		// Show progress
 		elapsed := time.Since(startTime)
-		avgTimePerDB := elapsed / time.Duration(i+1)
-		remaining := time.Duration(totalDBs-i-1) * avgTimePerDB
-		fmt.Printf("Progress: %d/%d completed | Elapsed: %v | ETA: %v\n\n",
-			i+1, totalDBs, elapsed.Round(time.Second), remaining.Round(time.Second))
+		completedCount := len(completedDBs) + successfulDumps
+		totalProgress := completedCount + skippedDumps
+		avgTimePerDB := elapsed / time.Duration(totalProgress)
+		remainingCount := totalDBs - totalProgress
+		remaining := time.Duration(remainingCount) * avgTimePerDB
+		fmt.Printf("📊 Progress: %d/%d completed (%d skipped) | Elapsed: %v | ETA: %v\n\n",
+			totalProgress, totalDBs, skippedDumps, elapsed.Round(time.Second), remaining.Round(time.Second))
 	}
 
 	// Final summary
@@ -270,14 +302,115 @@ func dumpDatabasesWithProgress(databases []string) error {
 	fmt.Printf("   Total databases: %d\n", totalDBs)
 	fmt.Printf("   Successful: %d\n", successfulDumps)
 	fmt.Printf("   Failed: %d\n", failedDumps)
+	fmt.Printf("   Skipped (trash): %d\n", skippedDumps)
+	fmt.Printf("   Previously completed: %d\n", len(completedDBs))
 	fmt.Printf("   Total time: %v\n", totalDuration.Round(time.Second))
-	fmt.Printf("   Average per database: %v\n", (totalDuration / time.Duration(totalDBs)).Round(time.Second))
+	if successfulDumps > 0 {
+		fmt.Printf("   Average per database: %v\n", (totalDuration / time.Duration(successfulDumps)).Round(time.Second))
+	}
 
 	if failedDumps > 0 {
+		fmt.Printf("⚠️  Warning: %d databases failed to dump\n", failedDumps)
 		return fmt.Errorf("dump completed with %d failures", failedDumps)
 	}
 
 	return nil
+}
+
+// Progress tracking functions
+func loadProgress() map[string]bool {
+	progressFile := dumpOutput + ".progress"
+	completedDBs := make(map[string]bool)
+
+	if data, err := os.ReadFile(progressFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if line = strings.TrimSpace(line); line != "" {
+				completedDBs[line] = true
+			}
+		}
+	}
+
+	return completedDBs
+}
+
+func saveProgress(completedDBs map[string]bool) {
+	progressFile := dumpOutput + ".progress"
+
+	var lines []string
+	for dbName := range completedDBs {
+		lines = append(lines, dbName)
+	}
+
+	data := strings.Join(lines, "\n") + "\n"
+	os.WriteFile(progressFile, []byte(data), 0644)
+}
+
+func isDatabaseCompleted(completedDBs map[string]bool, dbName string) bool {
+	return completedDBs[dbName]
+}
+
+func markDatabaseCompleted(dbName string) {
+	// Read existing progress
+	completedDBs := loadProgress()
+
+	// Mark as completed
+	completedDBs[dbName] = true
+
+	// Save back to file
+	saveProgress(completedDBs)
+}
+
+// Trash database detection
+func isTrashDatabase(dbName string) bool {
+	// Define patterns for trash/backup databases
+	trashPatterns := []string{
+		"backup",
+		"bak",
+		"old",
+		"temp",
+		"test",
+		"tmp",
+		"copy",
+		"archive",
+		"dump",
+		"bkp",
+		"save",
+		"restore",
+		"backup_",
+		"_backup",
+		"_old",
+		"_temp",
+		"_bak",
+		"_copy",
+		"_archive",
+		"_dump",
+		"_bkp",
+		"_save",
+		"_restore",
+	}
+
+	dbLower := strings.ToLower(dbName)
+
+	// Check if database name contains any trash patterns
+	for _, pattern := range trashPatterns {
+		if strings.Contains(dbLower, pattern) {
+			return true
+		}
+	}
+
+	// Check for databases with dates (likely backups)
+	// Pattern: name_YYYYMMDD or name_YYYY-MM-DD
+	if matched, _ := regexp.MatchString(`_\d{8}$|_\d{4}-\d{2}-\d{2}$`, dbName); matched {
+		return true
+	}
+
+	// Check for databases with timestamps
+	if matched, _ := regexp.MatchString(`_\d{10,}$`, dbName); matched {
+		return true
+	}
+
+	return false
 }
 
 func executeMysqldumpForDB(args []string, dbName string, password string, current, total int) error {
