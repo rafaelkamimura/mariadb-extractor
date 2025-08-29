@@ -14,11 +14,67 @@ A comprehensive CLI tool for extracting database information from MariaDB server
 
 ## Installation
 
-### Option 1: Build from Source
+### Option 1: Native Installation
 
 ```bash
 go build -o mariadb-extractor
 ```
+
+### Option 2: Docker (Recommended)
+
+```bash
+# Build the Docker image
+make build
+
+# Or build manually
+docker build -t mariadb-extractor .
+```
+
+## Quick Start with Docker
+
+```bash
+# 1. Set up environment
+make env-example
+# Edit .env with your database credentials
+
+# 2. Start development environment
+make setup-dev
+
+# 3. Access your database
+# - Adminer (web UI): http://localhost:8080
+# - MySQL client: make dev-db-connect
+
+# 4. Extract from production
+make extract
+make ddl
+make dump
+```
+
+## Makefile Commands
+
+The project includes a comprehensive Makefile for common operations:
+
+### Development Environment
+- `make setup-dev` - Set up complete development environment
+- `make up` - Start local MariaDB and Adminer
+- `make down` - Stop all services
+- `make dev-db-connect` - Connect to local database
+
+### Data Extraction
+- `make extract` - Extract metadata from configured server
+- `make ddl` - Extract DDL statements from configured server
+- `make dump` - Create full dump from configured server
+- `make extract-local` - Extract from local development database
+
+### Workflow Commands
+- `make extract-to-dev` - Extract from production and update local dev
+- `make backup-local` - Create backup of local development database
+
+### Utility Commands
+- `make build` - Build Docker image
+- `make clean` - Clean up generated files and containers
+- `make status` - Show status of all services
+- `make help` - Show all available commands
 
 ### Option 2: Docker (Recommended)
 
@@ -475,6 +531,41 @@ docker-compose run --rm mariadb-extractor ddl --databases ecommerce,blog
 
 # Create compressed dump
 docker-compose run --rm mariadb-extractor dump --all-databases --compress
+```
+
+## Development Workflow
+
+### 1. Extract from Production
+Use the mariadb-extractor to extract data from your production/external database:
+
+```bash
+# Extract metadata for documentation
+make extract
+
+# Extract DDL for schema management
+make ddl
+
+# Create full backup for local development
+make dump
+```
+
+### 2. Set up Local Development
+The extracted data is automatically used to populate your local MariaDB instance:
+
+```bash
+# Start local development environment
+make setup-dev
+
+# The init-scripts/ directory is mounted as Docker init scripts
+# Your extracted data will be automatically loaded into the local database
+```
+
+### 3. Update Local with Production Data
+When you need to refresh your local development database with fresh production data:
+
+```bash
+# Extract from production and update local dev
+make extract-to-dev
 ```
 
 ## Command Comparison

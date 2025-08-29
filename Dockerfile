@@ -1,8 +1,8 @@
 # Build stage
 FROM golang:1.25-alpine AS builder
 
-# Install git (required for go modules)
-RUN apk add --no-cache git
+# Install git and ca-certificates (needed for go modules)
+RUN apk add --no-cache git ca-certificates
 
 # Set working directory
 WORKDIR /app
@@ -16,13 +16,13 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o mariadb-extractor .
 
 # Final stage
 FROM alpine:latest
 
-# Install MariaDB client tools and ca-certificates
+# Install MariaDB client tools and other utilities
 RUN apk add --no-cache \
     mariadb-client \
     gzip \
@@ -39,14 +39,14 @@ WORKDIR /app
 # Copy the binary from builder stage
 COPY --from=builder /app/mariadb-extractor .
 
+# Copy init scripts
+COPY init-scripts/ ./init-scripts/
+
 # Change ownership to non-root user
-RUN chown appuser:appgroup mariadb-extractor
+RUN chown -R appuser:appgroup /app
 
 # Switch to non-root user
 USER appuser
-
-# Create volume for output files
-VOLUME ["/app/output"]
 
 # Set the binary as entrypoint
 ENTRYPOINT ["./mariadb-extractor"]
