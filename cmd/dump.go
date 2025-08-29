@@ -4,6 +4,7 @@ Copyright © 2025 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cobra"
 )
 
@@ -27,16 +29,17 @@ Generated dumps can be used to recreate databases locally with 'mysql < dump.sql
 }
 
 var (
-	dumpHost         string
-	dumpPort         int
-	dumpUser         string
-	dumpPassword     string
-	dumpOutput       string
-	dumpDatabases    []string
-	dumpSchemaOnly   bool
-	dumpDataOnly     bool
-	dumpAllDatabases bool
-	dumpCompress     bool
+	dumpHost             string
+	dumpPort             int
+	dumpUser             string
+	dumpPassword         string
+	dumpOutput           string
+	dumpDatabases        []string
+	dumpSchemaOnly       bool
+	dumpDataOnly         bool
+	dumpAllDatabases     bool
+	dumpAllUserDatabases bool
+	dumpCompress         bool
 )
 
 func init() {
@@ -58,7 +61,8 @@ func init() {
 
 	// Dump-specific flags
 	dumpCmd.Flags().StringSliceVarP(&dumpDatabases, "databases", "d", []string{}, "Specific databases to dump (comma-separated)")
-	dumpCmd.Flags().BoolVar(&dumpAllDatabases, "all-databases", false, "Dump all databases")
+	dumpCmd.Flags().BoolVar(&dumpAllDatabases, "all-databases", false, "Dump all databases (including system databases)")
+	dumpCmd.Flags().BoolVar(&dumpAllUserDatabases, "all-user-databases", false, "Dump all user databases (excluding system databases)")
 	dumpCmd.Flags().BoolVar(&dumpSchemaOnly, "schema-only", false, "Dump only schema (no data)")
 	dumpCmd.Flags().BoolVar(&dumpDataOnly, "data-only", false, "Dump only data (no schema)")
 	dumpCmd.Flags().BoolVarP(&dumpCompress, "compress", "c", false, "Compress output with gzip")
@@ -78,12 +82,16 @@ func runDump() {
 		log.Fatal("Cannot specify both --schema-only and --data-only")
 	}
 
-	if !dumpAllDatabases && len(dumpDatabases) == 0 {
-		log.Fatal("Must specify either --all-databases or --databases")
+	if dumpAllDatabases && dumpAllUserDatabases {
+		log.Fatal("Cannot specify both --all-databases and --all-user-databases")
 	}
 
-	if dumpAllDatabases && len(dumpDatabases) > 0 {
-		log.Fatal("Cannot specify both --all-databases and --databases")
+	if !dumpAllDatabases && !dumpAllUserDatabases && len(dumpDatabases) == 0 {
+		log.Fatal("Must specify one of: --all-databases, --all-user-databases, or --databases")
+	}
+
+	if (dumpAllDatabases || dumpAllUserDatabases) && len(dumpDatabases) > 0 {
+		log.Fatal("Cannot specify both --all-* flags and --databases")
 	}
 
 	fmt.Printf("Starting database dump from %s:%d\n", dumpHost, dumpPort)
@@ -127,11 +135,63 @@ func buildMysqldumpArgs() []string {
 	// Database selection
 	if dumpAllDatabases {
 		args = append(args, "--all-databases")
+	} else if dumpAllUserDatabases {
+		// Get list of user databases (excluding system databases)
+		userDBs, err := getUserDatabases()
+		if err != nil {
+			log.Fatalf("Failed to get user databases: %v", err)
+		}
+		if len(userDBs) == 0 {
+			log.Fatal("No user databases found to dump")
+		}
+		args = append(args, strings.Join(userDBs, " "))
+		fmt.Printf("Dumping user databases: %s\n", strings.Join(userDBs, ", "))
 	} else if len(dumpDatabases) > 0 {
 		args = append(args, strings.Join(dumpDatabases, " "))
 	}
 
 	return args
+}
+
+func getUserDatabases() ([]string, error) {
+	// Build connection string
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/information_schema?charset=utf8mb4&parseTime=true",
+		dumpUser, dumpPassword, dumpHost, dumpPort)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	// Get all user databases (excluding system databases)
+	query := `
+		SELECT SCHEMA_NAME
+		FROM information_schema.SCHEMATA
+		WHERE SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+		ORDER BY SCHEMA_NAME
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query databases: %w", err)
+	}
+	defer rows.Close()
+
+	var databases []string
+	for rows.Next() {
+		var dbName string
+		if err := rows.Scan(&dbName); err != nil {
+			return nil, fmt.Errorf("failed to scan database name: %w", err)
+		}
+		databases = append(databases, dbName)
+	}
+
+	return databases, nil
 }
 
 func executeMysqldump(args []string) error {

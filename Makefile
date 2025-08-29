@@ -64,11 +64,52 @@ ddl-local: ## Extract DDL from local development database
 		-v $(PWD):/app/output \
 		mariadb-extractor ddl -o local-ddl
 
-dump: ## Create full database dump from configured server
+dump: ## Create database dump of user databases (recommended)
+	@echo "Starting database dump of user databases (excluding system databases)..."
+	@echo "This may take a while for large databases..."
+	@echo "If this hangs or fails, try: make dump-specific DB=name"
 	docker run --rm \
 		--env-file .env \
 		-v $(PWD):/app/output \
-		mariadb-extractor dump --all-databases
+		mariadb-extractor dump --all-user-databases 2>&1 | tee dump.log
+	@echo "Dump completed. Check mariadb-dump.sql and dump.log for details."
+
+dump-all: ## Create full database dump including system databases
+	@echo "Starting full database dump (including system databases)..."
+	@echo "WARNING: This will include large system databases and may take a very long time!"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --all-databases 2>&1 | tee dump-all.log
+	@echo "Full dump completed. Check mariadb-dump.sql and dump-all.log for details."
+
+dump-specific: ## Dump a specific database (usage: make dump-specific DB=database_name)
+	@if [ -z "$(DB)" ]; then \
+		echo "Error: Please specify database name with DB= parameter"; \
+		echo "Example: make dump-specific DB=myapp"; \
+		exit 1; \
+	fi
+	@echo "Starting database dump of: $(DB)"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --databases $(DB) 2>&1 | tee dump-$(DB).log
+	@echo "Dump of $(DB) completed. Check mariadb-dump.sql and dump-$(DB).log for details."
+
+test-connection: ## Test database connection
+	@echo "Testing database connection..."
+	docker run --rm \
+		--env-file .env \
+		mariadb-extractor extract --help > /dev/null 2>&1 && echo "✅ Connection successful!" || echo "❌ Connection failed!"
+	@echo "If connection fails, check your .env file and database credentials."
+
+dump-safe: ## Create database dump excluding system databases
+	@echo "Starting safe database dump (excluding system databases)..."
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor dump --databases $(shell docker run --rm --env-file .env -v $(PWD):/app/output mariadb-extractor extract 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | grep -v -E '^(information_schema|mysql|performance_schema|sys)$' | tr '\n' ',' | sed 's/,$$//') 2>&1 | tee dump-safe.log
+	@echo "Safe dump completed. Check mariadb-dump.sql and dump-safe.log for details."
 
 dump-local: ## Create dump from local development database
 	docker run --rm --network mariadb-extractor_mariadb-network \
@@ -103,6 +144,20 @@ setup-dev: ## Set up complete development environment
 extract-to-dev: ## Extract from production and update local dev database
 	@echo "Extracting from production database..."
 	$(MAKE) dump
+	@echo "Updating local development database..."
+	@echo "Note: This will replace the current local database with production data"
+	@read -p "Continue? (y/N) " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		$(MAKE) import-production-data; \
+		echo "Local development database updated with production data!"; \
+	else \
+		echo "Operation cancelled."; \
+	fi
+
+extract-to-dev-full: ## Extract from production (including system DBs) and update local dev
+	@echo "Extracting from production database (including system databases)..."
+	@echo "WARNING: This will include large system databases!"
+	$(MAKE) dump-all
 	@echo "Updating local development database..."
 	@echo "Note: This will replace the current local database with production data"
 	@read -p "Continue? (y/N) " confirm; \
