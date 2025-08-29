@@ -29,6 +29,30 @@ go.work.sum
 !README.md
 !.env.example
 
+# Generated dump files
+mariadb-dump.sql
+mariadb-dump.sql.gz
+mariadb-dump*.sql
+mariadb-dump*.sql.gz
+*-dump.sql
+*-dump.sql.gz
+
+# Generated DDL files
+mariadb-ddl.md
+mariadb-ddl*.md
+*-ddl.md
+*-ddl*.md
+
+# Generated extract files
+mariadb-extract.md
+mariadb-extract.json
+mariadb-extract*.md
+mariadb-extract*.json
+*-extract.md
+*-extract.json
+*-extract*.md
+*-extract*.json
+
 # IDE files
 .idea/
 .vscode/
