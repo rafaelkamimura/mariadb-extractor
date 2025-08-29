@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cobra"
@@ -135,6 +136,7 @@ func buildMysqldumpArgs() []string {
 	// Database selection
 	if dumpAllDatabases {
 		args = append(args, "--all-databases")
+		fmt.Printf("Dumping ALL databases (including system databases)...\n")
 	} else if dumpAllUserDatabases {
 		// Get list of user databases (excluding system databases)
 		userDBs, err := getUserDatabases()
@@ -144,10 +146,26 @@ func buildMysqldumpArgs() []string {
 		if len(userDBs) == 0 {
 			log.Fatal("No user databases found to dump")
 		}
-		args = append(args, strings.Join(userDBs, " "))
-		fmt.Printf("Dumping user databases: %s\n", strings.Join(userDBs, ", "))
+
+		// Process databases individually for progress tracking
+		fmt.Printf("Found %d user databases to dump\n", len(userDBs))
+		if err := dumpDatabasesWithProgress(userDBs); err != nil {
+			log.Fatalf("Failed to dump databases: %v", err)
+		}
+		return nil // Early return since we handled the dump
 	} else if len(dumpDatabases) > 0 {
-		args = append(args, strings.Join(dumpDatabases, " "))
+		// If multiple databases specified, use progress mode
+		if len(dumpDatabases) > 1 {
+			fmt.Printf("Dumping %d specified databases with progress tracking\n", len(dumpDatabases))
+			if err := dumpDatabasesWithProgress(dumpDatabases); err != nil {
+				log.Fatalf("Failed to dump databases: %v", err)
+			}
+			return nil // Early return since we handled the dump
+		} else {
+			// Single database - use regular mode
+			fmt.Printf("Dumping database: %s\n", dumpDatabases[0])
+			args = append(args, dumpDatabases[0])
+		}
 	}
 
 	return args
@@ -194,6 +212,135 @@ func getUserDatabases() ([]string, error) {
 	return databases, nil
 }
 
+func dumpDatabasesWithProgress(databases []string) error {
+	totalDBs := len(databases)
+	fmt.Printf("Starting dump of %d databases...\n\n", totalDBs)
+
+	startTime := time.Now()
+	var successfulDumps, failedDumps int
+
+	for i, dbName := range databases {
+		dbStartTime := time.Now()
+		fmt.Printf("[%d/%d] Dumping database: %s\n", i+1, totalDBs, dbName)
+
+		// Build mysqldump args for this specific database
+		args := []string{
+			"-h", dumpHost,
+			"-P", strconv.Itoa(dumpPort),
+			"-u", dumpUser,
+			"--single-transaction",
+			"--quick",
+			"--lock-tables=false",
+			"--routines",
+			"--triggers",
+		}
+
+		// Add schema/data options
+		if dumpSchemaOnly {
+			args = append(args, "--no-data")
+		} else if dumpDataOnly {
+			args = append(args, "--no-create-info")
+		}
+
+		// Add the database name
+		args = append(args, dbName)
+
+		// Execute mysqldump for this database
+		if err := executeMysqldumpForDB(args, dbName, dumpPassword, i+1, totalDBs); err != nil {
+			fmt.Printf("❌ Failed to dump %s: %v\n", dbName, err)
+			failedDumps++
+			// Continue with next database even if this one fails
+		} else {
+			dbDuration := time.Since(dbStartTime)
+			fmt.Printf("✅ Completed %s in %v\n", dbName, dbDuration.Round(time.Second))
+			successfulDumps++
+		}
+
+		// Show progress
+		elapsed := time.Since(startTime)
+		avgTimePerDB := elapsed / time.Duration(i+1)
+		remaining := time.Duration(totalDBs-i-1) * avgTimePerDB
+		fmt.Printf("Progress: %d/%d completed | Elapsed: %v | ETA: %v\n\n",
+			i+1, totalDBs, elapsed.Round(time.Second), remaining.Round(time.Second))
+	}
+
+	// Final summary
+	totalDuration := time.Since(startTime)
+	fmt.Printf("🎉 Dump Summary:\n")
+	fmt.Printf("   Total databases: %d\n", totalDBs)
+	fmt.Printf("   Successful: %d\n", successfulDumps)
+	fmt.Printf("   Failed: %d\n", failedDumps)
+	fmt.Printf("   Total time: %v\n", totalDuration.Round(time.Second))
+	fmt.Printf("   Average per database: %v\n", (totalDuration / time.Duration(totalDBs)).Round(time.Second))
+
+	if failedDumps > 0 {
+		return fmt.Errorf("dump completed with %d failures", failedDumps)
+	}
+
+	return nil
+}
+
+func executeMysqldumpForDB(args []string, dbName string, password string, current, total int) error {
+	// Determine output file
+	outputFile := dumpOutput
+	if dumpCompress {
+		outputFile += ".sql.gz"
+	} else {
+		outputFile += ".sql"
+	}
+
+	// For multiple databases, append to the same file
+	file, err := os.OpenFile(outputFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open output file: %w", err)
+	}
+	defer file.Close()
+
+	// Add database header to the dump file
+	header := fmt.Sprintf("\n-- Database: %s\n-- Dumped at: %s\n\n", dbName, time.Now().Format("2006-01-02 15:04:05"))
+	if _, err := file.WriteString(header); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+
+	// Create a temporary my.cnf file for secure password passing
+	tmpFile, err := os.CreateTemp("", "mariadb-extractor-*.cnf")
+	if err != nil {
+		return fmt.Errorf("failed to create temp config file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Write MySQL config with credentials
+	configContent := fmt.Sprintf(`[client]
+host=%s
+port=%d
+user=%s
+password=%s
+`, dumpHost, dumpPort, dumpUser, password)
+
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Add --defaults-file to use our secure config
+	secureArgs := append([]string{"--defaults-file=" + tmpFile.Name()}, args...)
+
+	// Create the mysqldump command
+	cmd := exec.Command("mysqldump", secureArgs...)
+
+	// Set up output
+	cmd.Stdout = file
+	cmd.Stderr = os.Stderr
+
+	// Execute the command
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("mysqldump failed: %w", err)
+	}
+
+	return nil
+}
+
 func executeMysqldump(args []string) error {
 	// Check if mysqldump is available
 	if _, err := exec.LookPath("mysqldump"); err != nil {
@@ -212,10 +359,34 @@ func executeMysqldump(args []string) error {
 		outputFile += ".sql"
 	}
 
-	fmt.Printf("Executing: mysqldump %s > %s\n", strings.Join(args, " "), outputFile)
+	// Create a temporary my.cnf file for secure password passing
+	tmpFile, err := os.CreateTemp("", "mariadb-extractor-*.cnf")
+	if err != nil {
+		return fmt.Errorf("failed to create temp config file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Write MySQL config with credentials
+	configContent := fmt.Sprintf(`[client]
+host=%s
+port=%d
+user=%s
+password=%s
+`, dumpHost, dumpPort, dumpUser, dumpPassword)
+
+	if _, err := tmpFile.WriteString(configContent); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Add --defaults-file to use our secure config
+	secureArgs := append([]string{"--defaults-file=" + tmpFile.Name()}, args...)
+
+	fmt.Printf("Executing: mysqldump --defaults-file=**** %s > %s\n", strings.Join(args, " "), outputFile)
 
 	// Create the mysqldump command
-	cmd := exec.Command("mysqldump", args...)
+	cmd := exec.Command("mysqldump", secureArgs...)
 
 	// Set up output file
 	file, err := os.Create(outputFile)
@@ -272,6 +443,5 @@ func executeMysqldump(args []string) error {
 		}
 	}
 
-	fmt.Printf("Dump saved to: %s\n", outputFile)
 	return nil
 }
