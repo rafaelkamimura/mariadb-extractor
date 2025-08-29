@@ -31,7 +31,7 @@ dev-db-logs: ## Show logs from the development database
 	docker-compose logs -f mariadb
 
 dev-db-connect: ## Connect to the development database via mysql client
-	docker-compose exec mariadb mysql -u root -p
+	docker-compose exec mariadb mysql -u devuser -p
 
 # Extraction Commands
 extract: ## Extract database metadata from configured server
@@ -177,23 +177,20 @@ extract-to-dev: ## Extract DDL from production and set up local dev database (sc
 
 setup-from-ddl: ## Set up local database from extracted DDL
 	@echo "🔧 Setting up local database from DDL..."
-	@if [ ! -f "mariadb-ddl.md" ]; then \
-		echo "❌ Error: DDL file not found. Run 'make ddl' first."; \
+	@if [ ! -f "init-scripts/01-extracted-schema.sql" ]; then \
+		echo "❌ Error: DDL init script not found. Run 'make ddl' first."; \
 		exit 1; \
 	fi
-	@echo "Converting DDL markdown to SQL..."
-	# Extract SQL from markdown and create init script
-	awk 'BEGIN { in_sql = 0 } \
-		/^```sql$$/ { in_sql = 1; next } \
-		/^```$$/ { in_sql = 0; next } \
-		in_sql { print }' mariadb-ddl.md > init-scripts/01-extracted-schema.sql
-	@echo "Restarting database with new schema..."
+	@echo "DDL init script found. Restarting database with new schema..."
 	$(MAKE) down
 	docker volume rm mariadb-extractor_mariadb_data 2>/dev/null || true
 	$(MAKE) up
 	@echo "Waiting for database to initialize with schema..."
 	@sleep 30
 	@echo "✅ Database schema setup complete!"
+	@echo "🌐 Access your database:"
+	@echo "   - Adminer: http://localhost:8080"
+	@echo "   - MySQL: make dev-db-connect"
 
 migrate-data: ## Complete data migration workflow
 	@echo "🚀 Starting complete data migration..."
@@ -254,6 +251,24 @@ extract-data: ## Extract data from specific database
 		mariadb-extractor dump --databases $(DB) --data-only 2>&1 | tee dump-data-$(DB).log
 	@echo "✅ Data extraction complete for $(DB)!"
 	@echo "💡 Next: Run 'make import-data FILE=dump-data-$(DB).sql' to load locally"
+
+test-ddl-small: ## Test DDL extraction with just first 10 databases (to trigger save)
+	@echo "🧪 Testing DDL extraction with first 10 databases..."
+	@echo "This will process exactly 10 databases to trigger intermediate file saving"
+	@if [ ! -f .env ]; then \
+		echo "Error: .env file not found. Please create one from .env.example"; \
+		echo "Run: cp .env.example .env && edit .env with your credentials"; \
+		exit 1; \
+	fi
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor ddl 2>&1 | head -40
+	@echo ""
+	@echo "Test completed. Check for generated files:"
+	@echo "  - test-ddl.md (markdown documentation)"
+	@echo "  - init-scripts/01-extracted-schema.sql (SQL init script)"
+	@ls -la test-ddl.md init-scripts/01-extracted-schema.sql 2>/dev/null || echo "Files not found - process may have been interrupted"
 
 
 

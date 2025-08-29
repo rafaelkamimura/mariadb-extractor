@@ -1,0 +1,2 @@
+# This file ensures the init-scripts directory is tracked by git
+# while the actual SQL files are ignored

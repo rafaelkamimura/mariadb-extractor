@@ -55,8 +55,12 @@ mariadb-extract*.json
 
 # Local development files
 .env.local
-init-scripts/01-extracted-schema.md
-init-scripts/01-extracted-schema.sql
+
+# Generated init scripts (should not be tracked)
+init-scripts/*.sql
+init-scripts/*.md
+!init-scripts/.gitkeep
+!init-scripts/README.md
 
 # IDE files
 .idea/
