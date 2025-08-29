@@ -131,6 +131,84 @@ dump-local: ## Create dump from local development database
 		-v $(PWD):/app/output \
 		mariadb-extractor dump --all-databases -o local-dump
 
+# Query Commands (Safe read-only query execution)
+query: ## Execute a read-only query against the database
+	@if [ -z "$(Q)" ] && [ -z "$(FILE)" ]; then \
+		echo "Error: Please specify query with Q= or file with FILE="; \
+		echo "Example: make query Q='SELECT * FROM users LIMIT 10' DB=mydb"; \
+		echo "Example: make query FILE=queries.sql DB=mydb"; \
+		exit 1; \
+	fi
+	@if [ -n "$(Q)" ]; then \
+		docker run --rm \
+			--env-file .env \
+			-v $(PWD):/app/output \
+			mariadb-extractor query -q "$(Q)" $(if $(DB),-d $(DB)) $(if $(FORMAT),-f $(FORMAT)); \
+	else \
+		docker run --rm \
+			--env-file .env \
+			-v $(PWD):/app/output \
+			mariadb-extractor query -F "$(FILE)" $(if $(DB),-d $(DB)) $(if $(FORMAT),-f $(FORMAT)); \
+	fi
+
+query-json: ## Execute query with JSON output
+	@if [ -z "$(Q)" ]; then \
+		echo "Error: Please specify query with Q="; \
+		echo "Example: make query-json Q='SHOW TABLES' DB=mydb"; \
+		exit 1; \
+	fi
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor query -q "$(Q)" $(if $(DB),-d $(DB)) -f json
+
+query-csv: ## Execute query with CSV output
+	@if [ -z "$(Q)" ]; then \
+		echo "Error: Please specify query with Q="; \
+		echo "Example: make query-csv Q='SELECT * FROM users' DB=mydb"; \
+		exit 1; \
+	fi
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor query -q "$(Q)" $(if $(DB),-d $(DB)) -f csv
+
+query-relationships: ## Query foreign key relationships for a database
+	@if [ -z "$(DB)" ]; then \
+		echo "Error: Please specify database with DB="; \
+		echo "Example: make query-relationships DB=mydb"; \
+		exit 1; \
+	fi
+	@echo "Querying foreign key relationships for database: $(DB)"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor query -q "SELECT CONSTRAINT_NAME, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL AND TABLE_SCHEMA = '$(DB)'" -d information_schema -f json
+
+query-table-info: ## Query table information for a database
+	@if [ -z "$(DB)" ]; then \
+		echo "Error: Please specify database with DB="; \
+		echo "Example: make query-table-info DB=mydb"; \
+		exit 1; \
+	fi
+	@echo "Querying table information for database: $(DB)"
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor query -q "SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH FROM information_schema.TABLES WHERE TABLE_SCHEMA = '$(DB)'" -d information_schema -f markdown
+
+query-audit: ## Execute query with audit logging enabled
+	@if [ -z "$(Q)" ]; then \
+		echo "Error: Please specify query with Q="; \
+		echo "Example: make query-audit Q='SELECT * FROM sensitive_table' DB=mydb"; \
+		exit 1; \
+	fi
+	@mkdir -p output/audit
+	docker run --rm \
+		--env-file .env \
+		-v $(PWD):/app/output \
+		mariadb-extractor query -q "$(Q)" $(if $(DB),-d $(DB)) --audit-log /app/output/audit/query-audit.log
+
 # Data Extraction Commands (New selective data pipeline)
 extract-data-sample: ## Extract sample data from configured server (10% by default)
 	@echo "Extracting sample data from production database..."
